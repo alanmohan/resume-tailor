@@ -62,7 +62,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
 }
 
 /** One confirmed profile record with the statements generated for it. */
-function Entry({ entry }: { entry: ResumeEntry }) {
+function Entry({ entry, regenerable }: { entry: ResumeEntry; regenerable: boolean }) {
   const details = [entry.subheading, entry.location].filter(Boolean).join(', ')
   return (
     <div className="ws-entry">
@@ -78,7 +78,7 @@ function Entry({ entry }: { entry: ResumeEntry }) {
       {entry.bullets.length > 0 ? (
         <ul className="ws-bullets mt-2 list-disc space-y-3 pl-5">
           {entry.bullets.map((bullet) => (
-            <ClaimItem key={bullet.item_id} claim={bullet} as="li" />
+            <ClaimItem key={bullet.item_id} claim={bullet} as="li" regenerable={regenerable} />
           ))}
         </ul>
       ) : null}
@@ -114,7 +114,7 @@ export function ResumeDocument({ resume }: { resume: Resume | null }) {
         <Section key={section.key} id={`resume-${section.key}`} title={section.title}>
           <div className="space-y-5">
             {section.entries.map((entry) => (
-              <Entry key={entry.entry_id} entry={entry} />
+              <Entry key={entry.entry_id} entry={entry} regenerable={section.regenerable} />
             ))}
           </div>
         </Section>
@@ -124,7 +124,7 @@ export function ResumeDocument({ resume }: { resume: Resume | null }) {
         <Section id="resume-skills" title="Skills">
           <ul className="ws-skills divide-y divide-border/70 *:py-1.5">
             {resume.skills.map((claim) => (
-              <ClaimItem key={claim.item_id} claim={claim} as="li" compact />
+              <ClaimItem key={claim.item_id} claim={claim} as="li" compact regenerable={false} />
             ))}
           </ul>
         </Section>

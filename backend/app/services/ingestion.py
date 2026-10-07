@@ -458,30 +458,58 @@ def _drop_repeated_skills(records: list[ProfileRecord]) -> list[ProfileRecord]:
     return kept
 
 
+def _located_passages(record: ProfileRecord) -> list[SourceRef]:
+    """Where a record's header and statements were found in the sources."""
+    refs = [record.source_ref, *(bullet.source_ref for bullet in record.bullets)]
+    return [ref for ref in refs if ref is not None]
+
+
+def _record_quoted(ref: SourceRef, passages: list[tuple[SourceRef, str]]) -> str | None:
+    """The record a quoted span was taken from: the one with a header or
+    statement that overlaps the span in the same source. ``passages`` pairs
+    each located passage with the ID of its profile record."""
+    for passage, record_id in passages:
+        same_source = passage.source_id == ref.source_id
+        if same_source and passage.start < ref.end and ref.start < passage.end:
+            return record_id
+    return None
+
+
 def _read_conflict(
-    llm_conflict: LLMConflict, record_ids: list[str | None], by_alias: dict[str, PreparedSource]
+    llm_conflict: LLMConflict,
+    record_ids: list[str | None],
+    by_alias: dict[str, PreparedSource],
+    passages: list[tuple[SourceRef, str]],
 ) -> Conflict | None:
     """A conflict reported by the model. ``record_ids[i]`` is the profile record
-    that the model's i-th record ended up in (None if it was dropped)."""
+    that the model's i-th record ended up in (None if it was dropped).
+
+    The records in conflict are taken from the quotes: each quote is located
+    in its source and traced to the record written there. The positions the
+    model counted (``record_indexes``) are used only when a quote could not be
+    traced, because a model miscounts positions in a long list and would then
+    link the conflict to an unrelated record.
+    """
     description = _clean(llm_conflict.description)
     if description is None:
         return None
-    ids = [
-        record_ids[index]
-        for index in llm_conflict.record_indexes
-        if 0 <= index < len(record_ids) and record_ids[index]
-    ]
     values = []
+    traced: list[str | None] = []
     for llm_value in llm_conflict.values:
         value = _clean(llm_value.value)
+        if not value:
+            continue
         source = by_alias.get(llm_value.source)
-        if value:
-            values.append(
-                ConflictValue(
-                    value=value[:MAX_LINE_CHARS],
-                    source_ref=source.locate(llm_value.quote) if source else None,
-                )
-            )
+        ref = source.locate(llm_value.quote) if source else None
+        values.append(ConflictValue(value=value[:MAX_LINE_CHARS], source_ref=ref))
+        traced.append(_record_quoted(ref, passages) if ref else None)
+    ids = [record_id for record_id in traced if record_id]
+    if not traced or None in traced:
+        ids += [
+            record_ids[index]
+            for index in llm_conflict.record_indexes
+            if 0 <= index < len(record_ids) and record_ids[index]
+        ]
     return Conflict(
         conflict_id=new_id(),
         field=fold_text(llm_conflict.field).replace(" ", "_") or "other",
@@ -517,6 +545,8 @@ def build_draft(extraction: LLMExtraction, sources: list[PreparedSource]) -> Dra
     by_alias = {source.alias: source for source in sources}
     entries: list[_Entry] = []
     record_ids: list[str | None] = []
+    # Every located header and statement, with the ID of the record it ended up in.
+    passages: list[tuple[SourceRef, str]] = []
     date_conflicts: list[Conflict] = []
 
     for llm_record in extraction.records:
@@ -537,11 +567,14 @@ def build_draft(extraction: LLMExtraction, sources: list[PreparedSource]) -> Dra
             )
             _merge_into(target, incoming)
         record_ids.append(target.record.record_id)
+        passages += [(ref, target.record.record_id) for ref in _located_passages(incoming.record)]
 
     # Model-reported conflicts first, so their descriptions are the ones kept
     # when the deterministic date check found the same disagreement.
     conflicts: list[Conflict] = []
-    reported = [_read_conflict(item, record_ids, by_alias) for item in extraction.conflicts]
+    reported = [
+        _read_conflict(item, record_ids, by_alias, passages) for item in extraction.conflicts
+    ]
     for conflict in [*(c for c in reported if c is not None), *date_conflicts]:
         _add_conflict(conflicts, conflict)
 

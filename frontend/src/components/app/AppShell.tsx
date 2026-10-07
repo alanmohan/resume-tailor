@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
 import { FlaskConical, TimerOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -44,11 +44,22 @@ function SessionExpired() {
 export function AppShell() {
   const { status, expiresAt } = useSession()
   const providerMode = useProviderMode()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  // The query string counts: /job shows either the form or one job's review.
+  const screen = pathname + search
+  const mainRef = useRef<HTMLElement>(null)
+  const shownScreen = useRef(screen)
 
   useEffect(() => {
     window.scrollTo(0, 0)
-  }, [pathname])
+    // Moving to another screen removes the control that had focus. Put focus
+    // on the new screen's content so keyboard and screen-reader users continue
+    // from there instead of from the top of the header. Not on first load.
+    if (shownScreen.current !== screen) {
+      shownScreen.current = screen
+      mainRef.current?.focus({ preventScroll: true })
+    }
+  }, [screen])
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -82,7 +93,7 @@ export function AppShell() {
         </div>
       ) : null}
 
-      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 outline-none sm:px-6 sm:py-10">
+      <main id="main" ref={mainRef} tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 outline-none sm:px-6 sm:py-10">
         {status === 'expired' ? <SessionExpired /> : <Outlet />}
       </main>
 

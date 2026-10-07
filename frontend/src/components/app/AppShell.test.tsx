@@ -105,6 +105,23 @@ describe('AppShell', () => {
     expect(getSessionStatus()).toBe('none')
   })
 
+  it('moves keyboard focus to the new screen after navigating, but not on first load', async () => {
+    seedSession()
+    mockApi({
+      'GET /api/session': jsonResponse(sessionInfo({ has_profile: true })),
+      'GET /api/profile': jsonResponse(makeProfile()),
+    })
+    const { user } = renderApp('/')
+    const main = screen.getByRole('main')
+    expect(main).not.toHaveFocus()
+
+    const steps = within(screen.getByRole('navigation', { name: 'Steps' }))
+    await user.click(await steps.findByRole('link', { name: /Profile/ }))
+
+    await screen.findByRole('heading', { name: 'Review your profile' })
+    expect(main).toHaveFocus()
+  })
+
   it('renders a not-found page for unknown addresses', () => {
     mockApi()
     renderApp('/nope')

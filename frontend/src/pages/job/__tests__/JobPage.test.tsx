@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SAMPLE_JOB } from '@/sample/sampleData'
 import { makeProfile } from '@/test/fixtures'
 import {
@@ -191,7 +191,6 @@ describe('JobPage form', () => {
 
     await user.type(await screen.findByLabelText('Role title (optional)'), '  ML Engineer ')
     await pasteDescription(user, JOB_DESCRIPTION)
-    vi.mocked(window.scrollTo).mockClear()
     await user.click(screen.getByRole('button', { name: 'Analyze job' }))
 
     // While the request runs: an honest label and no second submission.
@@ -203,8 +202,6 @@ describe('JobPage form', () => {
     expect(
       await screen.findByRole('heading', { name: 'Review the job requirements' }),
     ).toBeInTheDocument()
-    // The review replaces the form in place, so the page returns to its top.
-    expect(window.scrollTo).toHaveBeenCalledWith(0, 0)
 
     const posts = requests.filter((request) => request.method === 'POST')
     expect(posts).toHaveLength(1)

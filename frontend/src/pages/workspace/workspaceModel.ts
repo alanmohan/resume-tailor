@@ -34,6 +34,12 @@ export interface EntrySection {
   key: 'experience' | 'projects' | 'education' | 'certifications'
   title: string
   entries: ResumeEntry[]
+  /**
+   * Whether the server can rewrite a statement of this section. Education and
+   * certification text is the confirmed profile text copied verbatim, so the
+   * server refuses to regenerate it (as it does for skills).
+   */
+  regenerable: boolean
 }
 
 /**
@@ -44,14 +50,20 @@ export interface EntrySection {
 export function entrySections(resume: Resume): EntrySection[] {
   const hasPublication = resume.projects.some((entry) => entry.category === 'publication')
   const sections: EntrySection[] = [
-    { key: 'experience', title: 'Experience', entries: resume.experience },
+    { key: 'experience', title: 'Experience', entries: resume.experience, regenerable: true },
     {
       key: 'projects',
       title: hasPublication ? 'Projects and publications' : 'Projects',
       entries: resume.projects,
+      regenerable: true,
     },
-    { key: 'education', title: 'Education', entries: resume.education },
-    { key: 'certifications', title: 'Certifications', entries: resume.certifications },
+    { key: 'education', title: 'Education', entries: resume.education, regenerable: false },
+    {
+      key: 'certifications',
+      title: 'Certifications',
+      entries: resume.certifications,
+      regenerable: false,
+    },
   ]
   return sections.filter((section) => section.entries.length > 0)
 }

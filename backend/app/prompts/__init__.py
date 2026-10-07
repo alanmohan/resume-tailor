@@ -14,7 +14,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent
 
 # Recorded with generations and logs so an output can be traced to the prompt
 # set that produced it. Bump it whenever a template changes.
-PROMPT_VERSION = "2026-10-07.2"
+PROMPT_VERSION = "2026-10-07.6"
 
 _NAME_PATTERN = re.compile(r"[a-z0-9_]+")
 

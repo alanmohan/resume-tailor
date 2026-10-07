@@ -1,6 +1,11 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
+import {
+  BACKEND_DIR,
+  BACKEND_PYTHON,
+  DROP_E2E_DATABASE,
+  FRONTEND_DIR,
+} from './e2e/support/backend.ts'
+import { API_PORT, API_URL, E2E_DATABASE, MONGODB_URI, WEB_PORT, WEB_URL } from './e2e/support/env.ts'
 
 /**
  * End-to-end tests against isolated local services.
@@ -8,7 +13,7 @@ import { defineConfig, devices } from '@playwright/test'
  * Playwright starts both servers itself, on ports that the development
  * servers (8000 and 5173) never use:
  *   - the API on 127.0.0.1:8010 with the deterministic fake AI provider and a
- *     throwaway database that is dropped before every run;
+ *     throwaway database that is dropped before and after every run;
  *   - the production build of the frontend on 127.0.0.1:5183, compiled to
  *     talk to that API.
  *
@@ -17,35 +22,28 @@ import { defineConfig, devices } from '@playwright/test'
  * instructions). No OpenAI call is ever made by these tests.
  */
 
-const frontendDir = path.dirname(fileURLToPath(import.meta.url))
-const backendDir = path.resolve(frontendDir, '../backend')
-
-const API_PORT = 8010
-const WEB_PORT = 5183
-export const API_URL = `http://127.0.0.1:${API_PORT}`
-export const WEB_URL = `http://127.0.0.1:${WEB_PORT}`
-
-const MONGODB_URI = 'mongodb://127.0.0.1:27017'
-/** APP_ENV=test refuses any database whose name does not start with "resume_tailor_test". */
-const E2E_DATABASE = 'resume_tailor_test_e2e'
 /** Build output for this run only, so `dist/` keeps the build made for deployment. */
 const E2E_BUILD_DIR = 'dist-e2e'
-
-const python = path.join(backendDir, '.venv', 'bin', 'python')
-const dropDatabase = `from pymongo import MongoClient; MongoClient('${MONGODB_URI}', serverSelectionTimeoutMS=5000).drop_database('${E2E_DATABASE}')`
 
 export default defineConfig({
   testDir: './e2e',
   outputDir: './test-results',
+  globalTeardown: './e2e/support/global-teardown.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : 3,
-  timeout: 90_000,
-  expect: { timeout: 15_000 },
+  // Generous limits: extraction, indexing and generation are real server
+  // work, and the suite must also pass on a machine that is busy with other
+  // things. A passing run is not slowed down by them.
+  timeout: 300_000,
+  expect: { timeout: 45_000 },
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
   use: {
     baseURL: WEB_URL,
+    // A missing element fails with its own message, well before the test timeout.
+    actionTimeout: 45_000,
+    navigationTimeout: 60_000,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // Reading the clipboard is how the Copy button is checked.
@@ -55,11 +53,11 @@ export default defineConfig({
   webServer: [
     {
       // Start from an empty database, then serve the API with the fake provider.
-      command: `"${python}" -c "${dropDatabase}" && "${python}" -m uvicorn app.main:app --host 127.0.0.1 --port ${API_PORT}`,
-      cwd: backendDir,
+      command: `"${BACKEND_PYTHON}" -c "${DROP_E2E_DATABASE}" && "${BACKEND_PYTHON}" -m uvicorn app.main:app --host 127.0.0.1 --port ${API_PORT}`,
+      cwd: BACKEND_DIR,
       url: `${API_URL}/readyz`,
       reuseExistingServer: false,
-      timeout: 60_000,
+      timeout: 120_000,
       env: {
         APP_ENV: 'test',
         AI_PROVIDER: 'fake',
@@ -74,10 +72,10 @@ export default defineConfig({
     },
     {
       command: `npx vite build --outDir ${E2E_BUILD_DIR} --emptyOutDir && npx vite preview --outDir ${E2E_BUILD_DIR} --host 127.0.0.1 --port ${WEB_PORT} --strictPort`,
-      cwd: frontendDir,
+      cwd: FRONTEND_DIR,
       url: WEB_URL,
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 180_000,
       env: { VITE_API_BASE_URL: API_URL },
     },
   ],

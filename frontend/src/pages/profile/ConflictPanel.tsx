@@ -77,7 +77,10 @@ export function ConflictPanel({ conflicts, records, busy, onResolve }: ConflictP
           return (
             <li key={conflict.conflict_id} className="space-y-3 rounded-lg border bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">Conflicting {conflict.field}</h3>
+                {/* The API names the field like "start_date"; show it as words. */}
+                <h3 className="text-sm font-medium">
+                  Conflicting {conflict.field.replaceAll('_', ' ')}
+                </h3>
                 <ResolutionBadge resolution={conflict.resolution} />
               </div>
               <p className="text-sm break-words">{conflict.description}</p>

@@ -20,6 +20,12 @@ interface ClaimItemProps {
   as?: 'li' | 'div'
   /** Put the text and its controls side by side. Used for skills, which are a word or two long. */
   compact?: boolean
+  /**
+   * Offer Regenerate. False for skills, education and certifications: the
+   * server only rewrites summary, experience, project and cover-letter
+   * statements, so the button would always end in an error there.
+   */
+  regenerable?: boolean
 }
 
 /**
@@ -30,7 +36,12 @@ interface ClaimItemProps {
  * warnings, Edit and Regenerate) lives in a sibling block that is hidden
  * when printing, so review markers can never leak into the document.
  */
-export function ClaimItem({ claim, as: Tag = 'div', compact = false }: ClaimItemProps) {
+export function ClaimItem({
+  claim,
+  as: Tag = 'div',
+  compact = false,
+  regenerable = true,
+}: ClaimItemProps) {
   const { isWriting } = useWorkspace()
   const [mode, setMode] = useState<Mode>('view')
   const rememberTrigger = useReturnFocus(mode !== 'view')
@@ -82,20 +93,22 @@ export function ClaimItem({ claim, as: Tag = 'div', compact = false }: ClaimItem
               <Pencil aria-hidden="true" />
               Edit
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground"
-              aria-label="Regenerate this statement"
-              aria-describedby={textId}
-              aria-expanded={mode === 'regenerate'}
-              disabled={controlsDisabled}
-              onClick={(event) => open('regenerate', event)}
-            >
-              <RefreshCw aria-hidden="true" />
-              Regenerate
-            </Button>
+            {regenerable ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="text-muted-foreground"
+                aria-label="Regenerate this statement"
+                aria-describedby={textId}
+                aria-expanded={mode === 'regenerate'}
+                disabled={controlsDisabled}
+                onClick={(event) => open('regenerate', event)}
+              >
+                <RefreshCw aria-hidden="true" />
+                Regenerate
+              </Button>
+            ) : null}
           </span>
         </div>
 

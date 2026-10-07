@@ -29,6 +29,19 @@ describe('entrySections', () => {
 
     expect(entrySections(resume).map((section) => section.title)).toContain('Projects and publications')
   })
+
+  it('marks only experience and projects as sections the server can regenerate', () => {
+    const resume = makeGeneration().resume!
+    resume.certifications.push(makeEntry({ entry_id: 'entry-8', category: 'certification' }))
+
+    const regenerable = entrySections(resume).map((section) => [section.key, section.regenerable])
+    expect(regenerable).toEqual([
+      ['experience', true],
+      ['projects', true],
+      ['education', false],
+      ['certifications', false],
+    ])
+  })
 })
 
 describe('listClaims', () => {

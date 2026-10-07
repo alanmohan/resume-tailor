@@ -300,9 +300,13 @@ describe('ProfilePage editing and saving', () => {
 
 describe('ProfilePage conflicts', () => {
   it('lists each conflicting value with its source and blocks confirmation', async () => {
-    const { user, requests } = openProfile(makeProfile({ conflicts: [makeConflict()] }))
+    const { user, requests } = openProfile(
+      makeProfile({ conflicts: [makeConflict({ field: 'start_date' })] }),
+    )
 
     const panel = within(await screen.findByRole('region', { name: 'Conflicts between your sources' }))
+    // The API's field name is shown as words, not as an identifier.
+    expect(panel.getByRole('heading', { name: 'Conflicting start date' })).toBeInTheDocument()
     expect(panel.getByText('Unresolved')).toBeInTheDocument()
     expect(panel.getByText('Aug 2022')).toBeInTheDocument()
     expect(panel.getByText('Sep 2022')).toBeInTheDocument()

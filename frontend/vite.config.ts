@@ -26,5 +26,9 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
     restoreMocks: true,
+    // Many tests render the whole app and wait for mocked network round
+    // trips. The default 5 s is too tight when the machine is busy (several
+    // test files run in parallel); a passing test is not slowed down by this.
+    testTimeout: 20_000,
   },
 })

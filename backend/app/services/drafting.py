@@ -144,6 +144,7 @@ def build_grounding(
         profile=Vocabulary.of(index.searchable.values()),
         requirement_keywords=frozenset(keywords),
         letter_terms=name_tokens(job_title, company, contact_name),
+        job_names=tuple(name.strip() for name in (job_title, company) if name and name.strip()),
     )
 
 

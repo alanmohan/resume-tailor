@@ -1,0 +1,142 @@
+/**
+ * Reviewing a draft against the real API: validation after a dishonest edit,
+ * the print gate, regeneration, coverage corrections, copying, and drafts
+ * that go out of date.
+ */
+import {
+  claimWithText,
+  editClaim,
+  heading,
+  pinClaim,
+  printCalls,
+  reachWorkspaceWithSample,
+} from './support/steps.ts'
+import { expect, test } from './support/test.ts'
+
+const DOCKER_BULLET = /^Packaged model services as Docker images/
+const KUBERNETES_EDIT = 'Packaged model services as Docker images and ran them on Kubernetes'
+
+test('a skill the profile does not contain is flagged after revalidation and gates printing', async ({
+  page,
+}) => {
+  await reachWorkspaceWithSample(page)
+  const resume = page.getByRole('tabpanel', { name: 'Resume' })
+  const claim = await pinClaim(page, claimWithText(resume, DOCKER_BULLET))
+  await expect(claim.getByText('Supported')).toBeVisible()
+
+  // The profile mentions Docker only. Claiming Kubernetes must not pass validation.
+  await editClaim(claim, KUBERNETES_EDIT)
+  await page.getByRole('button', { name: 'Revalidate' }).click()
+
+  await expect(claim.getByText('Unsupported')).toBeVisible()
+  await expect(claim.getByText('Supported', { exact: true })).toBeHidden()
+  await expect(claim).toContainText(/Kubernetes/)
+  await expect(claim.getByText(/\d+ warnings?/)).toBeVisible()
+  await expect(page.getByText('1 unsupported')).toBeVisible()
+  await expect(page.getByText('No statements are flagged.')).toBeHidden()
+  // The text itself is the visitor's: revalidation never rewrites it.
+  await expect(claim.locator('.ws-claim-text')).toHaveText(KUBERNETES_EDIT)
+
+  // Printing lists the flagged statement and needs an explicit acknowledgement.
+  await page.getByRole('button', { name: 'Print / Save as PDF' }).click()
+  const printGate = page.getByRole('dialog', { name: 'Review before printing' })
+  await expect(printGate).toContainText('1 statement has not been confirmed by validation.')
+  await expect(printGate.getByText(KUBERNETES_EDIT)).toBeVisible()
+  await expect(printGate.getByText('Unsupported')).toBeVisible()
+  const printAnyway = printGate.getByRole('button', { name: 'Print anyway' })
+  await expect(printAnyway).toBeDisabled()
+
+  // "Review" closes the dialog and goes to the statement instead of printing.
+  await printGate.getByRole('button', { name: 'Review' }).click()
+  await expect(printGate).toBeHidden()
+  await expect(claim).toBeFocused()
+  expect(await printCalls(page)).toBe(0)
+
+  // Copying is an export too and goes through the same review.
+  await page.evaluate(() => navigator.clipboard.writeText('clipboard before the test'))
+  await page.getByRole('button', { name: 'Copy', exact: true }).click()
+  const copyGate = page.getByRole('dialog', { name: 'Review before copying' })
+  await expect(copyGate.getByText(KUBERNETES_EDIT)).toBeVisible()
+  await expect(copyGate.getByRole('button', { name: 'Copy anyway' })).toBeDisabled()
+  await copyGate.getByRole('button', { name: 'Cancel' }).click()
+  await expect(copyGate).toBeHidden()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('clipboard before the test')
+
+  await page.getByRole('button', { name: 'Print / Save as PDF' }).click()
+  await printGate.getByRole('checkbox', { name: /I have read these statements/ }).check()
+  await printAnyway.click()
+  await expect(printGate).toBeHidden()
+  await expect.poll(() => printCalls(page)).toBe(1)
+})
+
+test('the resume is copied, a statement regenerated and a coverage status corrected', async ({ page }) => {
+  await reachWorkspaceWithSample(page)
+  const resume = page.getByRole('tabpanel', { name: 'Resume' })
+  const sidePanel = page.getByRole('complementary', { name: 'Evidence and coverage' })
+
+  // Nothing is flagged in the fresh draft, so Copy gives the document straight
+  // away: plain text, without review markers.
+  await expect(page.getByText('No statements are flagged.')).toBeVisible()
+  await page.getByRole('button', { name: 'Copy', exact: true }).click()
+  await expect(page.getByText('Resume copied as plain text')).toBeVisible()
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(copied).toContain('Jordan Rivera')
+  expect(copied).toContain('EXPERIENCE\nMachine Learning Engineer, Brightloom Labs')
+  expect(copied).toContain('SKILLS\n')
+  expect(copied).not.toMatch(/Supported|Regenerate|Evidence \d|Edit\b/)
+
+  // Regenerate is offered only where the server can rewrite a statement.
+  const regenerate = { name: 'Regenerate this statement' }
+  await expect(resume.getByRole('region', { name: 'Experience' }).getByRole('button', regenerate).first()).toBeVisible()
+  await expect(resume.getByRole('region', { name: 'Skills' }).getByRole('button', regenerate)).toHaveCount(0)
+  await expect(resume.getByRole('region', { name: 'Education' }).getByRole('button', regenerate)).toHaveCount(0)
+
+  const claim = await pinClaim(page, claimWithText(resume, DOCKER_BULLET))
+  const sent = page.waitForRequest((request) => request.url().endsWith('/regenerate'))
+  await claim.getByRole('button', regenerate).click()
+  await claim.getByRole('textbox', { name: 'Instruction (optional)' }).fill('Lead with the result')
+  await claim.getByRole('button', { name: 'Regenerate', exact: true }).click()
+  expect((await sent).headers()['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/)
+  await expect(page.getByText('Statement regenerated')).toBeVisible()
+  await expect(claim.getByRole('textbox', { name: 'Instruction (optional)' })).toBeHidden()
+  await expect(claim.locator('[data-status]')).toHaveText(/Supported|Needs review|Unsupported/)
+  await expect(claim.locator('.ws-claim-text')).not.toBeEmpty()
+
+  // Correcting a requirement's status is recorded as the visitor's own assessment.
+  const counts = sidePanel.getByRole('list', { name: 'Requirement counts' })
+  const uncertainBefore = Number.parseInt(await counts.getByRole('listitem').nth(3).innerText(), 10)
+  const firstRequirement = sidePanel.getByRole('region', { name: 'Requirements' }).getByRole('listitem').first()
+  await firstRequirement.getByRole('button', { name: 'Correct this status' }).click()
+  await firstRequirement.getByRole('combobox', { name: 'Status' }).click()
+  await page.getByRole('option', { name: 'Uncertain' }).click()
+  await firstRequirement.getByRole('textbox', { name: 'Note (optional)' }).fill('Only shown in coursework')
+  await firstRequirement.getByRole('button', { name: 'Save correction' }).click()
+  await expect(firstRequirement.getByText('Corrected by you')).toBeVisible()
+  await expect(firstRequirement.getByText('Your note: Only shown in coursework')).toBeVisible()
+  await expect(counts.getByRole('listitem').nth(3)).toHaveText(`${uncertainBefore + 1} uncertain not counted`)
+})
+
+test('editing the profile marks the existing draft as out of date', async ({ page }) => {
+  const generationId = await reachWorkspaceWithSample(page)
+  await expect(page.getByText('This draft is out of date')).toBeHidden()
+
+  await page.getByRole('navigation', { name: 'Steps' }).getByRole('link', { name: 'Profile' }).click()
+  await expect(heading(page, 'Review your profile')).toBeVisible()
+  await page.getByRole('textbox', { name: 'Location' }).first().fill('Cleveland, OH')
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  await expect(page.getByText('All changes are saved.')).toBeVisible()
+  // The edit has to be confirmed again before anything new can be generated.
+  await expect(page.getByRole('button', { name: 'Confirm profile and build evidence index' })).toBeEnabled()
+
+  await page.goto(`/workspace/${generationId}`)
+  const stale = page.getByRole('status').filter({ hasText: 'This draft is out of date' })
+  await expect(stale).toContainText('Your profile changed after this draft was generated.')
+  // The old draft is still readable and keeps the details it was generated from.
+  await expect(page.getByRole('tabpanel', { name: 'Resume' }).getByText('Columbus, OH')).toBeVisible()
+
+  await stale.getByRole('link', { name: 'Generate a new draft' }).click()
+  await expect(heading(page, 'Review the job requirements')).toBeVisible()
+  await expect(page.getByText('Your profile is not confirmed yet')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Generate tailored resume and cover letter' })).toBeDisabled()
+  await expect(page.getByRole('region', { name: 'Drafts for this job' }).getByText('Stale', { exact: true })).toBeVisible()
+})

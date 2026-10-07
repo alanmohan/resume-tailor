@@ -17,8 +17,8 @@ import type { Generation } from '@/lib/types'
 import { CoveragePanel } from './CoveragePanel'
 import { CoverLetterDocument, ResumeDocument } from './Documents'
 import { EvidenceDetail, EvidencePanel } from './EvidencePanel'
+import { ExportGateDialog, type ExportAction } from './ExportGateDialog'
 import { useIsWriting } from './generationData'
-import { PrintGateDialog } from './PrintGateDialog'
 import { StaleBanner } from './StaleBanner'
 import { ValidationBar } from './ValidationBar'
 import { WorkspaceContext } from './workspaceContext'
@@ -72,7 +72,9 @@ export function Workspace({ generation }: { generation: Generation }) {
   const [sideTab, setSideTab] = useState<SideTab>('coverage')
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
   const [evidenceSheetOpen, setEvidenceSheetOpen] = useState(false)
-  const [printGateOpen, setPrintGateOpen] = useState(false)
+  const [exportGateOpen, setExportGateOpen] = useState(false)
+  /** The export the review dialog was opened for. Kept after it closes, so its wording stays put. */
+  const [gatedAction, setGatedAction] = useState<ExportAction>('print')
   /** The control that opened the dialog or sheet, so focus can return to it. */
   const overlayOpener = useRef<HTMLElement | null>(null)
   /** A statement to go to once the open dialog or sheet has closed. */
@@ -133,10 +135,10 @@ export function Workspace({ generation }: { generation: Generation }) {
    * focusing earlier would put focus behind a modal that is still on screen.
    */
   function revealClaim(itemId: string) {
-    const overlayOpen = printGateOpen || (!twoPane && evidenceSheetOpen)
+    const overlayOpen = exportGateOpen || (!twoPane && evidenceSheetOpen)
     if (overlayOpen) {
       claimToReveal.current = itemId
-      setPrintGateOpen(false)
+      setExportGateOpen(false)
       setEvidenceSheetOpen(false)
     } else {
       showClaim(itemId)
@@ -166,21 +168,31 @@ export function Workspace({ generation }: { generation: Generation }) {
     }
   }
 
-  /** Print straight away only when nothing is waiting for the user's review. */
-  function requestPrint() {
+  function runExport(action: ExportAction) {
+    if (action === 'print') window.print()
+    else void copyActiveDocument()
+  }
+
+  /**
+   * Print or copy straight away only when nothing is waiting for the user's
+   * review. Otherwise the review dialog comes first, for both: a copied
+   * document leaves the app just as a printed one does.
+   */
+  function requestExport(action: ExportAction) {
     if (needsRevalidation || flagged.length > 0) {
       rememberOverlayOpener()
-      setPrintGateOpen(true)
+      setGatedAction(action)
+      setExportGateOpen(true)
     } else {
-      window.print()
+      runExport(action)
     }
   }
 
-  function printAnyway() {
-    // Close the dialog before the browser takes its snapshot. The print
+  function exportAnyway() {
+    // Close the dialog before the browser takes its print snapshot. The print
     // stylesheet also hides any dialog, in case it is still animating out.
-    flushSync(() => setPrintGateOpen(false))
-    window.print()
+    flushSync(() => setExportGateOpen(false))
+    runExport(gatedAction)
   }
 
   const target = jobLabel(generation)
@@ -233,7 +245,7 @@ export function Workspace({ generation }: { generation: Generation }) {
                     variant="outline"
                     size="sm"
                     aria-describedby="document-actions-hint"
-                    onClick={() => void copyActiveDocument()}
+                    onClick={() => requestExport('copy')}
                   >
                     <Copy aria-hidden="true" />
                     Copy
@@ -242,7 +254,7 @@ export function Workspace({ generation }: { generation: Generation }) {
                     type="button"
                     size="sm"
                     aria-describedby="document-actions-hint"
-                    onClick={requestPrint}
+                    onClick={() => requestExport('print')}
                   >
                     <Printer aria-hidden="true" />
                     Print / Save as PDF
@@ -342,15 +354,16 @@ export function Workspace({ generation }: { generation: Generation }) {
           )}
         </div>
 
-        <PrintGateDialog
-          open={printGateOpen}
-          onOpenChange={setPrintGateOpen}
+        <ExportGateDialog
+          open={exportGateOpen}
+          onOpenChange={setExportGateOpen}
           onCloseAutoFocus={handleOverlayClosed}
+          action={gatedAction}
           documentKind={activeDocument}
           flagged={flagged}
           needsRevalidation={needsRevalidation}
           onReview={revealClaim}
-          onPrint={printAnyway}
+          onConfirm={exportAnyway}
         />
       </div>
     </WorkspaceContext>

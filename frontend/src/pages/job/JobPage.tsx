@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router'
 import { FileText, SearchX } from 'lucide-react'
@@ -82,12 +81,6 @@ function LoadedJob({ jobId, profile }: WithProfile & { jobId: string }) {
  */
 function TargetJob({ profile }: WithProfile) {
   const [params] = useSearchParams()
-  const search = params.toString()
-  // The shell scrolls to the top when the path changes. Moving between the
-  // form and a job only changes the query string, so do the same here.
-  useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [search])
 
   const jobsQuery = useQuery({ queryKey: queryKeys.jobs, queryFn: listJobs })
   const jobs = jobsQuery.data?.jobs ?? []

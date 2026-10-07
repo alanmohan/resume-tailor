@@ -351,6 +351,36 @@ def test_connective_label_does_not_hide_a_claim() -> None:
     assert hidden_number.status == "unsupported"
 
 
+def test_a_figure_in_the_job_title_or_company_is_a_name_not_a_claim() -> None:
+    numbered_job = GroundingContext(
+        profile=Vocabulary.of(PROFILE_TEXTS),
+        requirement_keywords=frozenset(),
+        letter_terms=name_tokens("Platform Engineer 2", "Studio 54", "Jordan Rivera"),
+        job_names=("Platform Engineer 2", "Studio 54"),
+    )
+
+    def check(text: str, cited: list[str], *, factual: bool) -> ClaimVerdict:
+        return validate_claim(text, cited, numbered_job, section="cover_letter", factual=factual)
+
+    greeting = "Dear Hiring Manager, I am applying for the Platform Engineer 2 role at Studio 54."
+    assert check(greeting, [], factual=False) == ClaimVerdict("not_applicable", [])
+
+    # The same figures outside the job's name are still claims without evidence.
+    assert check("I led 2 teams and 54 releases.", [], factual=False).status == "unsupported"
+
+    # With evidence, the job's name is set aside and every other figure is checked.
+    fits = "My Docker work prepares me for the Platform Engineer 2 role at Studio 54."
+    assert check(fits, [DOCKER_EVIDENCE], factual=True).status == "supported"
+    invented = "At Studio 54 I would repeat the 54% saving I made with Docker."
+    assert check(invented, [DOCKER_EVIDENCE], factual=True).status == "unsupported"
+
+    # A resume statement may not name the job at all, so nothing is set aside there.
+    in_resume = validate_claim(
+        "Platform Engineer 2 work with Docker.", [DOCKER_EVIDENCE], numbered_job, section="summary"
+    )
+    assert in_resume.status == "unsupported"
+
+
 def test_connective_text_may_repeat_posting_words_only_if_the_profile_has_them() -> None:
     keywords = ["docker", "kubernetes"]
     about_the_job = verdict(

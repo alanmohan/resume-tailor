@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Printer } from 'lucide-react'
+import { Copy, Printer, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -15,8 +15,18 @@ import { Label } from '@/components/ui/label'
 import { ClaimStatusBadge } from './ClaimStatusBadge'
 import { DOCUMENT_LABEL, countLabel, type DocumentKind, type LocatedClaim } from './workspaceModel'
 
-interface PrintGateProps {
-  /** The document about to be printed. */
+/** The two ways a document leaves the app. Both go through the same review. */
+export type ExportAction = 'print' | 'copy'
+
+const ACTION_WORDING: Record<ExportAction, { title: string; verb: string; confirm: string; icon: LucideIcon }> = {
+  print: { title: 'Review before printing', verb: 'print', confirm: 'Print anyway', icon: Printer },
+  copy: { title: 'Review before copying', verb: 'copy', confirm: 'Copy anyway', icon: Copy },
+}
+
+interface ExportGateProps {
+  /** What the user asked for when the dialog opened. */
+  action: ExportAction
+  /** The document about to be printed or copied. */
   documentKind: DocumentKind
   /** Flagged statements of the whole draft, in reading order. */
   flagged: LocatedClaim[]
@@ -24,18 +34,26 @@ interface PrintGateProps {
   needsRevalidation: boolean
   /** Close the dialog and go to this statement. */
   onReview: (itemId: string) => void
-  /** Close the dialog and print. */
-  onPrint: () => void
+  /** Close the dialog and carry out the action. */
+  onConfirm: () => void
 }
 
 /**
  * The dialog's content. It is mounted only while the dialog is open, so the
  * acknowledgement starts unchecked every time the dialog is opened.
  */
-function PrintGate({ documentKind, flagged, needsRevalidation, onReview, onPrint }: PrintGateProps) {
+function ExportGate({
+  action,
+  documentKind,
+  flagged,
+  needsRevalidation,
+  onReview,
+  onConfirm,
+}: ExportGateProps) {
   const [acknowledged, setAcknowledged] = useState(false)
+  const { title, verb, confirm, icon: ConfirmIcon } = ACTION_WORDING[action]
   const documentName = DOCUMENT_LABEL[documentKind].toLowerCase()
-  // Statements of the document being printed come first.
+  // Statements of the document being exported come first.
   const ordered = [
     ...flagged.filter((item) => item.documentKind === documentKind),
     ...flagged.filter((item) => item.documentKind !== documentKind),
@@ -44,11 +62,11 @@ function PrintGate({ documentKind, flagged, needsRevalidation, onReview, onPrint
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Review before printing</DialogTitle>
+        <DialogTitle>{title}</DialogTitle>
         <DialogDescription>
           {flagged.length > 0
-            ? `${countLabel(flagged.length, 'statement has', 'statements have')} not been confirmed by validation. You are about to print the ${documentName}.`
-            : `You are about to print the ${documentName}.`}
+            ? `${countLabel(flagged.length, 'statement has', 'statements have')} not been confirmed by validation. You are about to ${verb} the ${documentName}.`
+            : `You are about to ${verb} the ${documentName}.`}
         </DialogDescription>
       </DialogHeader>
 
@@ -69,7 +87,7 @@ function PrintGate({ documentKind, flagged, needsRevalidation, onReview, onPrint
                   type="button"
                   variant="outline"
                   size="xs"
-                  aria-describedby={`print-gate-${claim.item_id}`}
+                  aria-describedby={`export-gate-${claim.item_id}`}
                   onClick={() => onReview(claim.item_id)}
                 >
                   Review
@@ -78,7 +96,7 @@ function PrintGate({ documentKind, flagged, needsRevalidation, onReview, onPrint
               <p className="text-xs text-muted-foreground">
                 {DOCUMENT_LABEL[claimDocument]} - {place}
               </p>
-              <p id={`print-gate-${claim.item_id}`} className="line-clamp-3 font-serif wrap-anywhere">
+              <p id={`export-gate-${claim.item_id}`} className="line-clamp-3 font-serif wrap-anywhere">
                 {claim.text}
               </p>
             </li>
@@ -88,13 +106,13 @@ function PrintGate({ documentKind, flagged, needsRevalidation, onReview, onPrint
 
       <div className="flex items-start gap-2.5">
         <Checkbox
-          id="print-gate-acknowledge"
+          id="export-gate-acknowledge"
           className="mt-0.5"
           checked={acknowledged}
           onCheckedChange={(checked) => setAcknowledged(checked === true)}
         />
-        <Label htmlFor="print-gate-acknowledge" className="leading-snug font-normal">
-          I have read these statements and want to print the document as it is.
+        <Label htmlFor="export-gate-acknowledge" className="leading-snug font-normal">
+          I have read these statements and want to {verb} the document as it is.
         </Label>
       </div>
 
@@ -104,16 +122,16 @@ function PrintGate({ documentKind, flagged, needsRevalidation, onReview, onPrint
             Cancel
           </Button>
         </DialogClose>
-        <Button type="button" disabled={!acknowledged} onClick={onPrint}>
-          <Printer aria-hidden="true" />
-          Print anyway
+        <Button type="button" disabled={!acknowledged} onClick={onConfirm}>
+          <ConfirmIcon aria-hidden="true" />
+          {confirm}
         </Button>
       </DialogFooter>
     </>
   )
 }
 
-interface PrintGateDialogProps extends PrintGateProps {
+interface ExportGateDialogProps extends ExportGateProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Radix calls this when the dialog has closed and focus is about to return to the page. */
@@ -121,15 +139,15 @@ interface PrintGateDialogProps extends PrintGateProps {
 }
 
 /**
- * Shown instead of printing straight away when statements still need the
- * user's attention: it lists them, offers to go to each one, and only prints
- * after an explicit acknowledgement.
+ * Shown instead of printing or copying straight away when statements still
+ * need the user's attention: it lists them, offers to go to each one, and
+ * only exports after an explicit acknowledgement.
  */
-export function PrintGateDialog({ open, onOpenChange, onCloseAutoFocus, ...gate }: PrintGateDialogProps) {
+export function ExportGateDialog({ open, onOpenChange, onCloseAutoFocus, ...gate }: ExportGateDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" onCloseAutoFocus={onCloseAutoFocus}>
-        <PrintGate {...gate} />
+        <ExportGate {...gate} />
       </DialogContent>
     </Dialog>
   )

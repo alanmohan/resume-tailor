@@ -4,6 +4,7 @@ import type { Generation } from '@/lib/types'
 import { deferred, errorResponse, jsonResponse } from '@/test/mockApi'
 import {
   GENERATION_ID,
+  makeClaim,
   makeEntry,
   makeGeneration,
   stubWideScreen,
@@ -154,6 +155,23 @@ describe('Workspace documents', () => {
         .map((badge) => badge.textContent),
     ).toEqual(['1', '2'])
     expect(claim('sum-2').queryByRole('button', { name: /Show evidence/ })).toBeNull()
+  })
+
+  it('offers Regenerate only for statements the server can rewrite', async () => {
+    const generation = makeGeneration()
+    generation.resume!.education[0].bullets = [makeClaim({ item_id: 'edu-1', text: 'GPA 3.7/4.0' })]
+    openWorkspace(generation)
+    await draftIsShown()
+
+    const regenerate = { name: 'Regenerate this statement' }
+    for (const itemId of ['sum-1', 'b-1', 'p-1', 'cl-2']) {
+      expect(claim(itemId).getByRole('button', { ...regenerate, hidden: true })).toBeInTheDocument()
+    }
+    // Skills, education and certifications are copied from the confirmed profile.
+    for (const itemId of ['sk-1', 'edu-1']) {
+      expect(claim(itemId).queryByRole('button', { ...regenerate, hidden: true })).toBeNull()
+      expect(claim(itemId).getByRole('button', { name: 'Edit this statement' })).toBeInTheDocument()
+    }
   })
 
   it('renders markup inside generated text as plain text and creates no elements from it', async () => {
@@ -479,7 +497,7 @@ describe('Workspace regenerating a statement', () => {
 
 describe('Workspace copy and print', () => {
   it('copies the active document as plain text', async () => {
-    const { user } = openWorkspace()
+    const { user } = openWorkspace(withNothingFlagged(makeGeneration()))
     await draftIsShown()
 
     await user.click(screen.getByRole('button', { name: 'Copy' }))
@@ -497,6 +515,29 @@ describe('Workspace copy and print', () => {
 
     expect(await screen.findByText('Cover letter copied as plain text')).toBeInTheDocument()
     expect(await navigator.clipboard.readText()).toContain('Dear Hiring Manager,')
+  })
+
+  it('asks for the same review before copying flagged statements', async () => {
+    const { user } = openWorkspace()
+    await draftIsShown()
+    await navigator.clipboard.writeText('what was on the clipboard before')
+
+    await user.click(screen.getByRole('button', { name: 'Copy' }))
+
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before copying' }))
+    expect(dialog.getByText(/You are about to copy the resume/)).toBeInTheDocument()
+    expect(dialog.getByText('Cut the nightly reporting job from 3 hours to 45 minutes')).toBeInTheDocument()
+    // Nothing is copied until the user has acknowledged the flagged statement.
+    expect(await navigator.clipboard.readText()).toBe('what was on the clipboard before')
+    const copyAnyway = dialog.getByRole('button', { name: 'Copy anyway' })
+    expect(copyAnyway).toBeDisabled()
+
+    await user.click(dialog.getByRole('checkbox', { name: /want to copy the document as it is/ }))
+    await user.click(copyAnyway)
+
+    expect(await screen.findByText('Resume copied as plain text')).toBeInTheDocument()
+    expect(await navigator.clipboard.readText()).toContain('Riley Example')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('prints straight away when nothing needs review', async () => {

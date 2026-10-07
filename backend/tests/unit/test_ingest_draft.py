@@ -525,6 +525,46 @@ def test_model_reported_conflict_is_not_duplicated_by_the_date_check() -> None:
     assert conflict.values[1].source_ref.excerpt == other_header
 
 
+def test_conflict_is_linked_to_the_quoted_record_when_the_model_miscounts_positions() -> None:
+    """Seen with the real model: the conflict's quotes were right, but one of
+    the positions it counted pointed at an unrelated record."""
+    other_header = "Data Engineer - Northwind Labs (Feb 2020 - Mar 2021)"
+    degree_header = "B.S. in Statistics - Lakeshore University (2015 - 2019)"
+    linkedin = f"Experience\n{other_header}\nEducation\n{degree_header}\n"
+    sources = [prepared(RESUME), prepared(linkedin, "S2", "LinkedIn")]
+    records = [
+        llm_record(),
+        llm_record(source="S2", start_date="Feb 2020", header_quote=other_header),
+        llm_record(
+            category="education",
+            title="B.S. in Statistics",
+            organization="Lakeshore University",
+            start_date="2015",
+            end_date="2019",
+            source="S2",
+            header_quote=degree_header,
+        ),
+    ]
+    reported = LLMConflict(
+        field="start_date",
+        description="The start month differs between the resume and LinkedIn.",
+        record_indexes=[0, 2],  # 2 is the degree; the LinkedIn role is 1
+        values=[
+            LLMConflictValue(value="Jan 2020", source="S1", quote=HEADER),
+            LLMConflictValue(value="Feb 2020", source="S2", quote=other_header),
+        ],
+    )
+    draft = draft_of(records, sources, conflicts=[reported])
+
+    role, degree = draft.records
+    assert (role.title, degree.title) == ("Data Engineer", "B.S. in Statistics")
+    # One conflict, about the role only: the degree is not drawn into it, and
+    # the date check's own finding is recognised as the same disagreement.
+    assert len(draft.conflicts) == 1
+    assert draft.conflicts[0].record_ids == [role.record_id]
+    assert [value.value for value in draft.conflicts[0].values] == ["Jan 2020", "Feb 2020"]
+
+
 def test_model_reported_conflict_about_another_field_is_kept() -> None:
     text = (
         "Experience\n"

@@ -268,6 +268,9 @@ class GroundingContext:
     requirement_keywords: frozenset[str]
     # Job title, company and candidate name: allowed in the cover letter only.
     letter_terms: frozenset[str]
+    # The job title and company exactly as written. A figure inside one of
+    # them ("SDE 2", "3M") names the job; it is not a claim about the candidate.
+    job_names: tuple[str, ...] = ()
 
 
 # ---- (b) Numbers with unit and context ---------------------------------------------
@@ -567,13 +570,23 @@ def escalation_findings(claim: str, cited_texts: list[str]) -> list[Finding]:
 # ---- (f) Connective text -----------------------------------------------------------
 
 
+def without_job_names(text: str, grounding: GroundingContext) -> str:
+    """``text`` with every exact mention of the job title and company blanked
+    out, for the figure checks of a cover letter. "I am applying for the SDE 2
+    role at 3M" then contains no figure, while "I led 2 teams" still does."""
+    for name in grounding.job_names:
+        text = re.sub(re.escape(name), " ", text, flags=re.IGNORECASE)
+    return text
+
+
 def connective_findings(
     text: str, grounding: GroundingContext, allowed: frozenset[str]
 ) -> list[Finding]:
     """Checks for cover-letter text that cites no evidence and was marked as
     connective. The mark is not trusted:
 
-    - a figure makes the sentence a factual claim without evidence (unsupported);
+    - a figure makes the sentence a factual claim without evidence
+      (unsupported), unless it is part of the job's own title or company name;
     - a name, or a requirement keyword that is nowhere in the confirmed
       profile, needs review: "my kubernetes skills match this role" claims a
       skill, however the model labelled it;
@@ -584,7 +597,7 @@ def connective_findings(
     naturally repeats the posting's words without claiming anything new.
     """
     findings = []
-    if find_numbers(spell_numbers_as_digits(text)):
+    if find_numbers(spell_numbers_as_digits(without_job_names(text, grounding))):
         findings.append(
             Finding("unsupported", "This sentence contains a figure but cites no evidence.")
         )
@@ -670,8 +683,10 @@ def validate_claim(
             return ClaimVerdict("unsupported", [NO_EVIDENCE_MESSAGE])
         return _verdict(connective_findings(text, grounding, allowed), "not_applicable")
 
+    # Only the cover letter may name the job, so only there is its name set aside.
+    figures_text = without_job_names(text, grounding) if section == "cover_letter" else text
     findings = [
-        *number_findings(text, cited_texts),
+        *number_findings(figures_text, cited_texts),
         *term_findings(text, Vocabulary.of(cited_texts), grounding, allowed),
         *escalation_findings(text, cited_texts),
     ]
