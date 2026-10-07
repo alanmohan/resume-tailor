@@ -241,6 +241,48 @@ def count_words(text: str) -> int:
     return len(text.split())
 
 
+def fold_text(text: str) -> str:
+    """Comparison form of a text: lower case, with every run of whitespace as
+    one space. Two texts that differ only in case or spacing fold to the same
+    string; used to spot duplicates and to look for a term in a text."""
+    return " ".join(text.casefold().split())
+
+
+# ---- Instruction-like text in untrusted data ---------------------------------------
+
+# Common prompt-injection phrasing: a chat-role prefix at the start of a line,
+# "ignore all previous instructions", "instructions for any AI system".
+_INSTRUCTION_LIKE = re.compile(
+    r"^\s*(?:system|assistant)\s*:"
+    r"|\b(?:ignore|disregard|forget)\s+(?:(?:all|any|the|your)\s+)*"
+    r"(?:previous|prior|above|earlier|preceding)\s+(?:instructions?|rules|prompts?)\b"
+    r"|\binstructions?\s+for\s+any\s+(?:ai|llm|language\s+model|assistant)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def looks_like_instruction(text: str) -> bool:
+    """True for text that addresses an AI system instead of describing a
+    person or a job, such as a line planted in a resume or job posting.
+
+    This is a second line of defence, not the main one: the prompts already
+    tell the model that supplied text is data, and generated claims are
+    validated against evidence. The check is a heuristic for well-known
+    phrasing; it can miss a new wording and can match an innocent sentence, so
+    callers leave such text out visibly (with a note) rather than silently.
+    """
+    return _INSTRUCTION_LIKE.search(text) is not None
+
+
+def surrounding_lines(text: str, start: int, end: int) -> str:
+    """The complete line or lines of ``text`` that contain the range
+    [start, end). A quote may be only part of a line; whether the line is an
+    instruction can only be judged from the whole line."""
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    return text[line_start : len(text) if line_end == -1 else line_end]
+
+
 # ---- Splitting long text into chunks -----------------------------------------------
 
 

@@ -27,6 +27,7 @@ from app.logging_config import exception_location, log_event, request_id_var
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
+API_PATH_PREFIX = "/api/"
 
 
 # Fixed framework pages that have no route template; safe to log as they are.
@@ -46,8 +47,9 @@ def _route_template(scope: Scope) -> str:
 
 
 class RequestContextMiddleware:
-    """Assigns a request ID, returns it as X-Request-ID and writes one access
-    log line per request (method, route template, status, duration)."""
+    """Assigns a request ID, returns it as X-Request-ID, adds the response
+    headers every answer must carry and writes one access log line per
+    request (method, route template, status, duration)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -66,7 +68,15 @@ class RequestContextMiddleware:
             nonlocal status_code
             if message["type"] == "http.response.start":
                 status_code = message["status"]
-                MutableHeaders(scope=message)[REQUEST_ID_HEADER] = request_id
+                headers = MutableHeaders(scope=message)
+                headers[REQUEST_ID_HEADER] = request_id
+                # Responses are data, not pages: the browser must use the declared
+                # content type and never guess that pasted text is HTML.
+                headers["X-Content-Type-Options"] = "nosniff"
+                if scope["path"].startswith(API_PATH_PREFIX):
+                    # API responses hold personal documents and, once, the session
+                    # token; neither may be kept in a browser or proxy cache.
+                    headers["Cache-Control"] = "no-store"
             await send(message)
 
         try:

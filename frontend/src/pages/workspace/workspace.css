@@ -1,0 +1,203 @@
+/*
+ * Print layout for the Workspace screen.
+ *
+ * Printing (or "Save as PDF") outputs exactly one thing: the active document,
+ * as one column of black text on white paper. Everything used to review it
+ * stays on screen.
+ *
+ * How the pieces fit together:
+ *   - Review controls carry Tailwind's `print:hidden` in the components.
+ *   - This file does what a utility class cannot: page margins, choosing the
+ *     document panel, resetting the paper surface, and page-break rules.
+ *   - The rules are not inside a cascade layer, so they win over Tailwind's
+ *     utilities (which are layered) without needing `!important`. Where
+ *     `!important` does appear, the comment above it says what it has to
+ *     beat: an inline style, or a rule that is itself important.
+ *
+ * The `ws-*` class names are set in Workspace.tsx, Documents.tsx and
+ * ClaimItem.tsx. The few rules without a `ws-` class (page colours, hidden
+ * overlays, screen-reader-only text) apply to printing from any screen.
+ */
+
+@page {
+  margin: 16mm 18mm;
+}
+
+@media print {
+  /* ------------------------------------------------------------- page */
+
+  /* White paper whatever the screen theme is. The theme sets color-scheme
+     as an inline style on <html>, hence !important. */
+  html {
+    color-scheme: light !important;
+  }
+
+  html,
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  /* While a dialog is open the UI library locks scrolling with important
+     rules on body[data-scroll-locked]. Printing in that state must still
+     produce every page, so this selector is made more specific than theirs. */
+  html body,
+  html body[data-scroll-locked] {
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Text that exists only for screen readers (such as the shell's "Skip to
+     main content" link) has no place on paper, and must not end up as hidden
+     text inside a saved PDF. */
+  .sr-only {
+    display: none;
+  }
+
+  /* Rendered outside the page's own tree: toasts, dialogs, sheets, popovers.
+     They belong to UI libraries that also position them with inline styles,
+     so nothing they set may bring them back: !important. */
+  [data-sonner-toaster],
+  [data-slot='dialog-overlay'],
+  [data-slot='dialog-content'],
+  [data-slot='sheet-overlay'],
+  [data-slot='sheet-content'],
+  [data-slot='alert-dialog-overlay'],
+  [data-slot='alert-dialog-content'],
+  [data-radix-popper-content-wrapper] {
+    display: none !important;
+  }
+
+  /* ----------------------------------------------------------- layout */
+
+  /* The app shell centres the page in a padded, full-height flex column.
+     On paper the document starts at the top left and flows as plain blocks,
+     which is what page breaking works best with. */
+  :has(> main > .ws-root) {
+    display: block;
+    min-height: 0;
+  }
+
+  main:has(> .ws-root) {
+    max-width: none;
+    padding: 0;
+  }
+
+  /* Tailwind's space-y utilities put the gap in margin-block on each child. */
+  .ws-root > * {
+    margin-block: 0;
+  }
+
+  .ws-layout,
+  .ws-tabs {
+    display: block;
+  }
+
+  /* Exactly one document panel prints: the active one. On a narrow screen it
+     may be hidden behind the Coverage tab with an inline display:none, hence
+     !important. */
+  .ws-document-panel {
+    display: none !important;
+  }
+
+  .ws-document-panel[data-print-target='true'] {
+    display: block !important;
+  }
+
+  /* ------------------------------------------------------------ paper */
+
+  .ws-paper {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    font-size: 11pt;
+    line-height: 1.45;
+  }
+
+  /* Black on white for everything that prints, including text that is grey
+     or tinted on screen and the focus outline of a statement. */
+  .ws-document-panel,
+  .ws-document-panel * {
+    background: transparent;
+    border-color: #000;
+    box-shadow: none;
+    color: #000;
+    outline: none;
+  }
+
+  /* Safety net: no control or review marker inside the paper is ever
+     printed, even one that is missing its own print:hidden or carries an
+     inline display style, hence !important. */
+  .ws-paper :is(button, input, textarea, select, details, form),
+  .ws-paper :is([data-slot='badge'], [data-slot='alert'], [role='status']) {
+    display: none !important;
+  }
+
+  /* ------------------------------------------------------ page breaks */
+
+  /* The wide tracking of the section titles is decoration for the screen.
+     In a PDF it can make text extraction split a word ("SU MMARY"), which
+     matters for a resume that software will read. */
+  .ws-section-title {
+    letter-spacing: 0.04em;
+  }
+
+  /* A heading stays with the content that follows it. */
+  .ws-contact,
+  .ws-section-title,
+  .ws-entry-header {
+    break-after: avoid;
+  }
+
+  /* A role, project or degree is kept on one page when it fits on one. */
+  .ws-entry {
+    break-inside: avoid;
+  }
+
+  .ws-claim {
+    break-inside: avoid;
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* ------------------------------------------------------- statements */
+
+  /* On screen each statement has its controls underneath, so statements are
+     spaced apart. On paper they read as normal resume text. */
+  .ws-bullets > li {
+    margin-block: 0 2pt;
+  }
+
+  /* Summary lines flow together as one paragraph. */
+  .ws-summary > .ws-claim,
+  .ws-summary .ws-claim-text {
+    display: inline;
+  }
+
+  .ws-summary .ws-claim-text::after {
+    content: ' ';
+  }
+
+  /* Skills become one comma-separated line. */
+  .ws-skills > li {
+    display: inline;
+    padding: 0;
+    border: 0;
+  }
+
+  .ws-skills .ws-claim-text {
+    display: inline;
+  }
+
+  .ws-skills > li:not(:last-child) .ws-claim-text::after {
+    content: ', ';
+  }
+
+  .ws-letter > .ws-claim {
+    margin-block: 0 10pt;
+  }
+}

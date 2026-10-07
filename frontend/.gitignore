@@ -7,6 +7,8 @@ npm-debug.log*
 node_modules
 dist
 dist-ssr
+# Build served by the Playwright run (see playwright.config.ts)
+dist-e2e
 
 # Local environment files (.env.example is the committed template)
 .env

@@ -11,6 +11,11 @@ from app.providers.llm_model import LLMModel
 from app.schemas.generations import CoverageStatus
 
 Verdict = Literal["supported", "partially_supported", "unsupported"]
+# "statement": something the candidate did or achieved (a bullet, a role
+# summary, a skill list). "record_details": only the name, dates and place of
+# the record itself. It shows that a role or degree exists, which can answer a
+# requirement, but it is not material for a resume bullet.
+EvidenceKind = Literal["statement", "record_details"]
 
 # ---- Generation input ----------------------------------------------------------
 
@@ -49,6 +54,7 @@ class LLMContextEvidence(LLMModel):
     # Alias of the profile record this evidence belongs to, if any.
     record: str | None
     category: str
+    kind: EvidenceKind
     text: str
 
 

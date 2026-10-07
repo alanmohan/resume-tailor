@@ -33,8 +33,11 @@ class LLMContactItem(LLMModel):
 
 
 class LLMBullet(LLMModel):
-    text: str
+    """One statement of a record. There is no separate ``text`` field: the
+    quote is the statement, so the model writes each sentence only once."""
+
     source: str
+    # The statement copied verbatim from the source, without its list marker.
     quote: str
 
 

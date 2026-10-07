@@ -31,6 +31,17 @@ class GenerationRepository(OwnedRepository[GenerationDoc]):
         )
         return [self._from_mongo(raw) async for raw in cursor]
 
+    async def find_by_idempotency_key(
+        self, owner_id: str, idempotency_key: str
+    ) -> GenerationDoc | None:
+        """The owner's generation that was started with this Idempotency-Key, or
+        None. Lets a repeated request be answered from the stored document
+        before any precondition, quota or provider work is done."""
+        raw = await self._collection.find_one(
+            {"owner_id": owner_id, "idempotency_key": idempotency_key}
+        )
+        return self._from_mongo(raw) if raw else None
+
     async def claim(
         self, owner_id: str, candidate: GenerationDoc, now: datetime
     ) -> tuple[GenerationDoc, bool]:
