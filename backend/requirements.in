@@ -1,0 +1,10 @@
+# Runtime dependencies (unpinned input).
+# Compile the lockfile with:
+#   uv pip compile --python-version 3.12 requirements.in -o requirements.txt
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+pymongo
+openai
+numpy

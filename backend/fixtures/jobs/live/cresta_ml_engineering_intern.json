@@ -1,0 +1,58 @@
+{
+  "synthetic": false,
+  "slug": "cresta_ml_engineering_intern",
+  "title": "Machine Learning Engineering Intern",
+  "company": "Cresta",
+  "location": "Toronto, Canada (Hybrid)",
+  "source_url": "https://job-boards.greenhouse.io/cresta/jobs/4123863008",
+  "fetch_url": "https://boards-api.greenhouse.io/v1/boards/cresta/jobs/4123863008",
+  "date_retrieved": "2026-10-07",
+  "posting_last_updated": "2026-08-03",
+  "fit_category": "close",
+  "why_selected": "Internship-level applied AI role centred on retrieval-augmented generation, knowledge search and evaluation, asking for Python and a deep learning framework from a current Bachelor's or Master's student. This matches the search keywords RAG, LLM evaluation, Python and PyTorch at the right seniority.",
+  "selected_requirements": [
+    {
+      "kind": "required",
+      "text": "Currently pursuing a Bachelor's or Master's degree in Computer Science, Artificial Intelligence, Machine Learning, or a related technical field."
+    },
+    {
+      "kind": "required",
+      "text": "Proficiency in Python and familiarity with at least one deep learning framework (e.g., PyTorch, TensorFlow)."
+    },
+    {
+      "kind": "required",
+      "text": "Strong understanding of machine learning fundamentals and generative modeling."
+    },
+    {
+      "kind": "required",
+      "text": "Ability to design and analyze experiments involving large-scale datasets."
+    },
+    {
+      "kind": "responsibility",
+      "text": "Retrieval-Augmented Generation (RAG): A critical project underpinning GenKA, KS, and VA, enabling efficient retrieval of relevant knowledge content and generating read-to-use agent responses grounded in knowledge."
+    },
+    {
+      "kind": "responsibility",
+      "text": "Focus on practical AI challenges such as improving reasoning, and evaluation in real-world scenarios."
+    },
+    {
+      "kind": "responsibility",
+      "text": "Innovate and research ways to improve security, cost-efficiency, and reliability of AI systems."
+    }
+  ],
+  "selection_hypothesis": {
+    "note": "Guesses made from the broad search keywords used to pick this posting, not from the profile itself. Confirm or correct them when the posting is tested locally.",
+    "likely_supported": [
+      "Python",
+      "PyTorch",
+      "retrieval-augmented generation",
+      "evaluation of AI systems",
+      "currently pursuing a Master's degree"
+    ],
+    "likely_gaps": [
+      "experiments on large-scale datasets"
+    ]
+  },
+  "access_notes": "Public posting on Cresta's official Greenhouse board; no login. The page was opened with a web fetch and the text was read from the board's public JSON API (fetch_url).",
+  "local_full_text": "_local_full/cresta_ml_engineering_intern.txt"
+}

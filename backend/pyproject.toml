@@ -1,0 +1,26 @@
+# Tool configuration only. Dependencies are pinned in requirements.txt and
+# requirements-dev.txt (compiled from the matching .in files with uv).
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not smoke'"
+markers = [
+    "smoke: opt-in tests that call the real AI provider and cost money (run with: -m smoke)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC"]
+# SIM905: a whitespace-separated word list is easier to read and edit than a list literal.
+ignore = ["SIM905"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares dependencies as call expressions in parameter defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query", "fastapi.Path"]

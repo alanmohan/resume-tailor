@@ -1,0 +1,30 @@
+Jordan Rivera
+Machine Learning Engineer at Brightloom Labs
+Columbus, Ohio, United States
+jordan.rivera@example.com
+
+About
+I build machine learning features that people use every day: search, classification, and question answering. Before moving into machine learning I spent two years as a product-focused software engineer, so I care about tests, latency, and clear APIs as much as model quality.
+
+Experience
+Machine Learning Engineer - Brightloom Labs (Aug 2024 - Present)
+- Lead engineer for the support assistant, which answers customer questions from the company help center
+- Added hybrid keyword and embedding retrieval, improving top-5 retrieval recall from 0.71 to 0.84 on the internal evaluation set
+- Run weekly error-analysis reviews with 3 support team leads to decide which answer failures to fix first
+
+Software Engineer - Quillfeather Software (Jun 2022 - Jul 2024)
+- Reduced median API response time from 420 ms to 290 ms by adding Redis caching and PostgreSQL indexes
+- Moved the customer export feature from a cron script to a queued worker, removing 2 hours of manual support work per week
+- Mentored 2 new engineers through their first quarter on the team
+
+Software Engineering Intern - Harborline Robotics (May 2021 - Aug 2021)
+- Summer internship on the fleet diagnostics team, working in Python and Flask
+
+Education
+B.S. in Computer Science - Fairhaven Institute of Technology (Aug 2018 - May 2022)
+
+Skills
+Python, PyTorch, FastAPI, React, TypeScript, Docker, PostgreSQL, AWS, Machine Learning, Natural Language Processing
+
+Certifications
+AWS Certified Cloud Practitioner - Amazon Web Services (Mar 2024)

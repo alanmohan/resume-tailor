@@ -1,0 +1,22 @@
+Background notes for Jordan Rivera (extra details that are not on the resume)
+
+Experience
+Volunteer Web Developer - Cedar Hollow Community Library
+- Rebuilt the library events page as a static site and showed 2 librarians how to update it
+- I did not write down the dates; it was part-time while I was at university
+
+Machine Learning Engineer - Brightloom Labs (Aug 2024 - Present)
+- Gave a 30-minute internal talk on measuring retrieval quality, attended by about 25 engineers
+- On the on-call rotation for the support assistant one week in every 6
+
+Projects
+TrailNotes - Personal project (Jan 2024 - Apr 2024)
+- Hand-labelled 60 test queries and measured recall@5 of 0.78 for the search
+- Stored embeddings in MongoDB and ranked them in Python instead of using a managed vector database
+
+Skills
+Coursework exposure only: TensorFlow (one assignment in a deep learning course)
+Spoken languages: English (native), Spanish (conversational)
+
+Achievements
+- Won second place out of 18 teams at Fairhaven Hack Night 2021 with the first PantryPal prototype

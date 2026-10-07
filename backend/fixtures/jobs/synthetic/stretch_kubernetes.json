@@ -1,0 +1,53 @@
+{
+  "synthetic": true,
+  "slug": "stretch_kubernetes",
+  "title": "Senior Platform Engineer, ML Infrastructure",
+  "company": "Ironbark Cloud Systems",
+  "purpose": "Stretch: explicitly requires Kubernetes and other infrastructure skills. The sample profile has Docker but never mentions Kubernetes, so no Kubernetes experience may be generated.",
+  "description": "About the role\nIronbark Cloud Systems runs GPU clusters for machine learning teams. We are hiring a Senior Platform Engineer to own the Kubernetes platform that schedules model workloads for our customers.\n\nResponsibilities\n- Operate and scale multi-tenant Kubernetes clusters running GPU workloads\n- Write Kubernetes operators and controllers in Golang\n- Manage infrastructure as code with Terraform and Helm\n- Run Kafka event pipelines and Prometheus monitoring\n- Lead incident response for the platform\n\nRequirements\n- 5+ years of experience operating Kubernetes in production\n- Strong programming skills in Golang\n- Experience with Terraform and Helm\n- Experience running Kafka in production\n- Experience with Prometheus and Grafana\n- Experience with Docker and container image builds\n- Proficiency in Python for automation\n\nPreferred qualifications\n- Certified Kubernetes Administrator (CKA)\n- Experience with GPU scheduling\n- Experience with AWS\n- Experience with CI/CD tools such as GitHub Actions",
+  "expected": {
+    "required_keywords": [
+      "Kubernetes",
+      "Golang",
+      "Terraform",
+      "Helm",
+      "Kafka",
+      "Prometheus",
+      "Grafana",
+      "Docker",
+      "Python"
+    ],
+    "preferred_keywords": [
+      "Certified Kubernetes Administrator",
+      "GPU scheduling",
+      "AWS",
+      "GitHub Actions"
+    ],
+    "expected_supported": [
+      "Docker",
+      "Python",
+      "AWS",
+      "GitHub Actions"
+    ],
+    "expected_missing": [
+      "Kubernetes",
+      "Golang",
+      "Terraform",
+      "Helm",
+      "Kafka",
+      "Prometheus",
+      "Grafana",
+      "Certified Kubernetes Administrator",
+      "GPU scheduling"
+    ],
+    "must_not_claim": [
+      "Kubernetes",
+      "Golang",
+      "Terraform",
+      "Helm",
+      "Kafka",
+      "Prometheus",
+      "Grafana"
+    ]
+  }
+}

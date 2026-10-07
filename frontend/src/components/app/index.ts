@@ -1,0 +1,12 @@
+/** Shared application components. Import from "@/components/app". */
+export { AppShell, DEMO_MODE_MESSAGE, FOOTER_DISCLAIMER } from './AppShell'
+export { CharCounter } from './CharCounter'
+export { ClearDataDialog } from './ClearDataDialog'
+export { EmptyState } from './EmptyState'
+export { ErrorAlert } from './ErrorAlert'
+export { LoadingBlock } from './LoadingBlock'
+export { PageHeader } from './PageHeader'
+export { SourceExcerpt } from './SourceExcerpt'
+export { StatusBadge } from './StatusBadge'
+export { STATUS_META, type Status, type StatusMeta, type StatusTone } from './statusMeta'
+export { ThemeToggle } from './ThemeToggle'

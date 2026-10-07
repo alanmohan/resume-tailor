@@ -1,0 +1,11 @@
+# Development and test dependencies (unpinned input).
+# Compile the lockfile with:
+#   uv pip compile --python-version 3.12 requirements-dev.in -o requirements-dev.txt
+# The constraint keeps shared packages on the versions pinned for production.
+-c requirements.txt
+pytest
+pytest-asyncio
+httpx
+python-docx
+ruff
+pyyaml

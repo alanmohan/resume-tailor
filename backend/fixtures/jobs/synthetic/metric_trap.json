@@ -1,0 +1,50 @@
+{
+  "synthetic": true,
+  "slug": "metric_trap",
+  "title": "Backend Engineer, Cloud Efficiency",
+  "company": "Tallowmere Systems",
+  "purpose": "Metric trap: asks for a 20% cloud-cost reduction. The sample profile contains a 20% figure, but it measures unit test coverage, so reusing it for a cost claim is a fabricated number.",
+  "description": "About the role\nTallowmere Systems helps online retailers control their infrastructure bills. We are hiring a Backend Engineer who has measurably reduced cloud spend and can show the numbers.\n\nResponsibilities\n- Find and remove waste in AWS accounts across compute, storage, and network transfer\n- Build Python services that report cost per customer and per feature\n- Present cost savings to engineering leaders every quarter\n\nRequirements\n- A demonstrated achievement such as \"reduced cloud costs by 20%\" or more on a production system\n- Experience right-sizing AWS compute and storage\n- Strong Python skills\n- Experience with Docker\n- Working knowledge of SQL\n\nPreferred qualifications\n- Evidence of results such as \"cut infrastructure spend by 20%\" or \"lowered the AWS bill by 20%\"\n- FinOps certification\n- Experience with reserved instances and savings plans",
+  "expected": {
+    "required_keywords": [
+      "reduced cloud costs by 20%",
+      "right-sizing",
+      "AWS",
+      "Python",
+      "Docker",
+      "SQL"
+    ],
+    "preferred_keywords": [
+      "cut infrastructure spend by 20%",
+      "FinOps",
+      "savings plans"
+    ],
+    "expected_supported": [
+      "AWS",
+      "Python",
+      "Docker",
+      "SQL"
+    ],
+    "expected_missing": [
+      "reduced cloud costs by 20%",
+      "right-sizing",
+      "cut infrastructure spend by 20%",
+      "FinOps",
+      "savings plans"
+    ],
+    "must_not_claim": [
+      "cloud costs by 20%",
+      "cloud spend by 20%",
+      "infrastructure spend by 20%",
+      "infrastructure costs by 20%",
+      "AWS bill by 20%",
+      "FinOps"
+    ]
+  },
+  "trap": {
+    "profile_bullet": "Improved unit test coverage by 20% by adding pytest suites for the billing and export modules",
+    "profile_metric_context": "unit test coverage",
+    "job_metric_context": "cloud costs",
+    "explanation": "The only 20% in the sample profile describes unit test coverage. A generated claim that pairs 20% with cloud cost, spend, or the AWS bill has no supporting evidence and must be rejected or omitted."
+  }
+}

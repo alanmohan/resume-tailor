@@ -1,0 +1,182 @@
+{
+  "fictional": true,
+  "description": "Facts that tests may assert about the fictional sample profile (Jordan Rivera). Every string below appears verbatim in the named source file unless a field says otherwise.",
+  "source_files": {
+    "resume": "sample_resume.txt",
+    "linkedin": "sample_linkedin.txt",
+    "notes": "sample_notes.txt"
+  },
+  "contact": {
+    "name": "Jordan Rivera",
+    "email": "jordan.rivera@example.com",
+    "phone": "(614) 555-0142",
+    "location": "Columbus, OH",
+    "link": "https://example.com/in/jordan-rivera"
+  },
+  "roles": [
+    {
+      "title": "Machine Learning Engineer",
+      "employer": "Brightloom Labs",
+      "start": "Aug 2024",
+      "end": "Present",
+      "date_string": "Aug 2024 - Present",
+      "sources": ["resume", "linkedin", "notes"]
+    },
+    {
+      "title": "Software Engineer",
+      "employer": "Quillfeather Software",
+      "start": "Jul 2022",
+      "end": "Jul 2024",
+      "date_string": "Jul 2022 - Jul 2024",
+      "sources": ["resume", "linkedin"],
+      "note": "Dates are the resume's. The LinkedIn text gives a different start month; see expected_conflict."
+    },
+    {
+      "title": "Software Engineering Intern",
+      "employer": "Harborline Robotics",
+      "start": "May 2021",
+      "end": "Aug 2021",
+      "date_string": "May 2021 - Aug 2021",
+      "sources": ["resume", "linkedin"]
+    }
+  ],
+  "ambiguous_items": [
+    {
+      "kind": "role",
+      "title": "Volunteer Web Developer",
+      "employer": "Cedar Hollow Community Library",
+      "source": "notes",
+      "header_line": "Volunteer Web Developer - Cedar Hollow Community Library",
+      "reason": "The role has no dates. It must be flagged for review, and no dates may be guessed for it."
+    }
+  ],
+  "projects": [
+    {
+      "name": "TrailNotes",
+      "context": "Personal project",
+      "date_string": "Jan 2024 - Apr 2024",
+      "sources": ["resume", "notes"]
+    },
+    {
+      "name": "PantryPal",
+      "context": "University capstone project",
+      "date_string": "Sep 2021 - May 2022",
+      "sources": ["resume"]
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Fairhaven Institute of Technology",
+      "date_string": "Aug 2018 - May 2022",
+      "gpa": "3.7/4.0",
+      "sources": ["resume", "linkedin"]
+    }
+  ],
+  "certifications": [
+    {
+      "name": "AWS Certified Cloud Practitioner",
+      "issuer": "Amazon Web Services",
+      "date_string": "Mar 2024",
+      "sources": ["resume", "linkedin"]
+    }
+  ],
+  "key_numbers": [
+    {"text": "40,000 help-center articles", "source": "resume", "belongs_to": "Brightloom Labs"},
+    {"text": "8,500 labelled support tickets", "source": "resume", "belongs_to": "Brightloom Labs"},
+    {"text": "macro F1 from 0.81 to 0.88", "source": "resume", "belongs_to": "Brightloom Labs"},
+    {"text": "300 graded question-answer pairs", "source": "resume", "belongs_to": "Brightloom Labs"},
+    {"text": "image size from 1.4 GB to 380 MB", "source": "resume", "belongs_to": "Brightloom Labs"},
+    {"text": "median API response time from 420 ms to 290 ms", "source": "resume", "belongs_to": "Quillfeather Software"},
+    {"text": "unit test coverage by 20%", "source": "resume", "belongs_to": "Quillfeather Software"},
+    {"text": "35 internal support agents", "source": "resume", "belongs_to": "Quillfeather Software"},
+    {"text": "from 3 hours to 45 minutes", "source": "resume", "belongs_to": "Quillfeather Software"},
+    {"text": "1.2 million log lines per day", "source": "resume", "belongs_to": "Harborline Robotics"},
+    {"text": "12,000 hiking trip reports", "source": "resume", "belongs_to": "TrailNotes"},
+    {"text": "180 ms p95 search latency", "source": "resume", "belongs_to": "TrailNotes"},
+    {"text": "team of 4", "source": "resume", "belongs_to": "PantryPal"},
+    {"text": "350 registered student users", "source": "resume", "belongs_to": "PantryPal"},
+    {"text": "top-5 retrieval recall from 0.71 to 0.84", "source": "linkedin", "belongs_to": "Brightloom Labs"},
+    {"text": "2 hours of manual support work per week", "source": "linkedin", "belongs_to": "Quillfeather Software"},
+    {"text": "recall@5 of 0.78", "source": "notes", "belongs_to": "TrailNotes"},
+    {"text": "second place out of 18 teams", "source": "notes", "belongs_to": "PantryPal"}
+  ],
+  "unrelated_metric": {
+    "value": "20%",
+    "context": "unit test coverage",
+    "bullet": "Improved unit test coverage by 20% by adding pytest suites for the billing and export modules",
+    "source": "resume",
+    "belongs_to": "Quillfeather Software",
+    "note": "This is the only percentage in the whole sample profile. It is not evidence for any other 20% claim, for example a 20% cost reduction."
+  },
+  "skills_present": [
+    "Python",
+    "TypeScript",
+    "JavaScript",
+    "SQL",
+    "FastAPI",
+    "Flask",
+    "React",
+    "PyTorch",
+    "scikit-learn",
+    "Docker",
+    "GitHub Actions",
+    "PostgreSQL",
+    "MongoDB",
+    "Redis",
+    "AWS",
+    "Git",
+    "pytest"
+  ],
+  "skills_familiarity_only": [
+    {
+      "skill": "TensorFlow",
+      "source": "notes",
+      "line": "Coursework exposure only: TensorFlow (one assignment in a deep learning course)",
+      "note": "Must never be presented as professional experience or as a core skill."
+    }
+  ],
+  "skills_absent": [
+    "Kubernetes",
+    "Helm",
+    "Terraform",
+    "Kafka",
+    "Spark",
+    "Hadoop",
+    "Airflow",
+    "Golang",
+    "Node.js",
+    "GraphQL",
+    "Prometheus",
+    "Grafana",
+    "PhD"
+  ],
+  "skills_absent_note": "None of these strings occurs anywhere in the three sample sources, even as a case-insensitive substring.",
+  "expected_conflict": {
+    "kind": "role_start_date",
+    "title": "Software Engineer",
+    "employer": "Quillfeather Software",
+    "values": {
+      "resume": "Jul 2022",
+      "linkedin": "Jun 2022"
+    },
+    "header_lines": {
+      "resume": "Software Engineer - Quillfeather Software (Jul 2022 - Jul 2024)",
+      "linkedin": "Software Engineer - Quillfeather Software (Jun 2022 - Jul 2024)"
+    },
+    "expected_behaviour": "Show the conflict to the user. Do not pick one date silently and do not split the role into two roles."
+  },
+  "duplicated_bullet": {
+    "text": "Reduced median API response time from 420 ms to 290 ms by adding Redis caching and PostgreSQL indexes",
+    "sources": ["resume", "linkedin"],
+    "belongs_to": "Quillfeather Software",
+    "expected_behaviour": "Keep one record for this statement, with both sources recorded as provenance."
+  },
+  "counts": {
+    "dated_roles": 3,
+    "undated_roles": 1,
+    "projects": 2,
+    "degrees": 1,
+    "certifications": 1
+  }
+}

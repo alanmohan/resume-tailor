@@ -1,0 +1,22 @@
+# Local development and test database only. Production uses MongoDB Atlas.
+# The port is bound to the loopback interface so the database is never
+# reachable from other machines on the network.
+name: resume-tailor
+
+services:
+  mongo:
+    image: mongo:8.0.32
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  mongo_data:

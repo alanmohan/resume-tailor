@@ -1,0 +1,44 @@
+Jordan Rivera
+Columbus, OH | jordan.rivera@example.com | (614) 555-0142 | https://example.com/in/jordan-rivera
+
+Summary
+Machine learning engineer with four years of software experience building Python services, retrieval features, and model evaluation tooling. Comfortable across the stack, from PyTorch model code to FastAPI backends and React front ends.
+
+Experience
+Machine Learning Engineer - Brightloom Labs (Aug 2024 - Present)
+- Built a retrieval-augmented generation (RAG) service in Python and FastAPI that answers support questions over 40,000 help-center articles
+- Fine-tuned a PyTorch text classifier on 8,500 labelled support tickets, raising macro F1 from 0.81 to 0.88
+- Created an offline evaluation harness with 300 graded question-answer pairs to compare LLM prompt and retrieval changes before release
+- Packaged model services as Docker images and cut image size from 1.4 GB to 380 MB with multi-stage builds
+
+Software Engineer - Quillfeather Software (Jul 2022 - Jul 2024)
+- Reduced median API response time from 420 ms to 290 ms by adding Redis caching and PostgreSQL indexes
+- Improved unit test coverage by 20% by adding pytest suites for the billing and export modules
+- Built React and TypeScript dashboards used by 35 internal support agents
+- Cut a nightly reporting job from 3 hours to 45 minutes by batching SQL queries
+- Set up GitHub Actions pipelines that run tests and build Docker images on every pull request
+
+Software Engineering Intern - Harborline Robotics (May 2021 - Aug 2021)
+- Wrote Python scripts that parse robot telemetry logs and flag sensor dropouts, processing 1.2 million log lines per day
+- Added a Flask REST API endpoint and a small web page for viewing flagged dropouts
+
+Projects
+TrailNotes - Personal project (Jan 2024 - Apr 2024)
+- Built semantic search over 12,000 hiking trip reports using sentence embeddings and cosine similarity
+- Served results through a FastAPI backend with a 180 ms p95 search latency
+
+PantryPal - University capstone project (Sep 2021 - May 2022)
+- Led a team of 4 building a recipe recommendation web app with React, Flask, and PostgreSQL
+- Deployed the app with Docker on AWS for 350 registered student users
+
+Education
+B.S. in Computer Science - Fairhaven Institute of Technology (Aug 2018 - May 2022)
+- GPA 3.7/4.0; coursework in machine learning, databases, and distributed systems
+
+Skills
+Languages: Python, TypeScript, JavaScript, SQL
+Frameworks: FastAPI, Flask, React, PyTorch, scikit-learn
+Tools: Docker, GitHub Actions, PostgreSQL, MongoDB, Redis, AWS (S3, EC2, Lambda), Git, pytest
+
+Certifications
+AWS Certified Cloud Practitioner - Amazon Web Services (Mar 2024)

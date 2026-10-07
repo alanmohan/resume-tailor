@@ -1,0 +1,61 @@
+{
+  "synthetic": false,
+  "slug": "stripe_software_engineer_new_grad",
+  "title": "Software Engineer, New Grad",
+  "company": "Stripe",
+  "location": "San Francisco, Seattle, New York",
+  "source_url": "https://stripe.com/jobs/search?gh_jid=8128744",
+  "fetch_url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/8128744",
+  "date_retrieved": "2026-10-07",
+  "posting_last_updated": "2026-09-25",
+  "fit_category": "partial",
+  "why_selected": "General new-graduate software engineering role with no AI or machine learning focus. The seniority fits, but the named languages (Java, Ruby, Scala, Go) are outside the search keywords, so a tailored resume has to lead with general engineering evidence rather than LLM work.",
+  "selected_requirements": [
+    {
+      "kind": "required",
+      "text": "A Bachelor’s or Master’s degree in computer science or a directly related field, obtained by summer 2027, or equivalent work experience; New grad candidates should have no more than 18 months of professional experience (excluding internship experience)."
+    },
+    {
+      "kind": "required",
+      "text": "Experience and familiarity with programming, either through side projects or classwork. We work mostly in Java, Ruby, JavaScript, Scala, and Go. We believe new programming languages can be learned if the fundamentals and general knowledge are present."
+    },
+    {
+      "kind": "required",
+      "text": "Experience from either previous internships or working collaboratively on multi-person coding projects (in a university or professional setting)."
+    },
+    {
+      "kind": "required",
+      "text": "Ability to leverage AI tools to accelerate development while applying rigorous critical thinking and professional judgement to review, refine, and validate all outputs."
+    },
+    {
+      "kind": "preferred",
+      "text": "One or more areas of specialized knowledge (frontend, backend, infrastructure or other technologies) balanced with general skills and knowledge."
+    },
+    {
+      "kind": "preferred",
+      "text": "Experience in code review practices, and an understanding of how to safely update production systems."
+    },
+    {
+      "kind": "preferred",
+      "text": "Familiarity with navigating and managing work in large code bases."
+    }
+  ],
+  "selection_hypothesis": {
+    "note": "Guesses made from the broad search keywords used to pick this posting, not from the profile itself. Confirm or correct them when the posting is tested locally.",
+    "likely_supported": [
+      "Master's degree in a related field in progress",
+      "internship experience",
+      "JavaScript through React and TypeScript work",
+      "using AI tools with critical review"
+    ],
+    "likely_gaps": [
+      "Java",
+      "Ruby",
+      "Scala",
+      "Go",
+      "work in large code bases"
+    ]
+  },
+  "access_notes": "Public posting on Stripe's own careers site (stripe.com/jobs); no login. The page was opened with a web fetch and the text was read from Stripe's public Greenhouse board JSON API (fetch_url).",
+  "local_full_text": "_local_full/stripe_software_engineer_new_grad.txt"
+}

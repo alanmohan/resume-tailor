@@ -1,0 +1,50 @@
+{
+  "synthetic": true,
+  "slug": "close_fit",
+  "title": "Applied Machine Learning Engineer",
+  "company": "Fernhollow AI",
+  "purpose": "Close fit: every listed keyword has direct evidence in the sample profile.",
+  "description": "About the role\nFernhollow AI builds search and question-answering tools for customer support teams. We are hiring an Applied Machine Learning Engineer to ship retrieval and language-model features end to end, from evaluation to production APIs.\n\nResponsibilities\n- Design, build, and evaluate retrieval-augmented generation (RAG) features over large document collections\n- Train and fine-tune PyTorch models for text classification and ranking\n- Build and maintain Python services with FastAPI and well-tested REST APIs\n- Package and ship services with Docker and automated CI pipelines\n- Work with support teams to analyse failures and prioritise improvements\n\nRequirements\n- 2+ years of professional software or machine learning engineering experience\n- Strong Python skills and experience building REST APIs with FastAPI or Flask\n- Hands-on experience with PyTorch\n- Experience with embeddings, semantic search, or retrieval-augmented generation (RAG)\n- Experience building evaluation sets or offline evaluation for machine learning or LLM features\n- Experience with Docker\n- Working knowledge of SQL and a relational database such as PostgreSQL\n\nPreferred qualifications\n- Front-end experience with React and TypeScript\n- Experience with AWS\n- Experience with CI/CD tools such as GitHub Actions\n- Bachelor's degree in Computer Science or a related field",
+  "expected": {
+    "required_keywords": [
+      "Python",
+      "REST API",
+      "FastAPI",
+      "PyTorch",
+      "embeddings",
+      "semantic search",
+      "retrieval-augmented generation",
+      "evaluation",
+      "Docker",
+      "SQL",
+      "PostgreSQL"
+    ],
+    "preferred_keywords": [
+      "React",
+      "TypeScript",
+      "AWS",
+      "GitHub Actions",
+      "Computer Science"
+    ],
+    "expected_supported": [
+      "Python",
+      "REST API",
+      "FastAPI",
+      "PyTorch",
+      "embeddings",
+      "semantic search",
+      "retrieval-augmented generation",
+      "evaluation",
+      "Docker",
+      "SQL",
+      "PostgreSQL",
+      "React",
+      "TypeScript",
+      "AWS",
+      "GitHub Actions",
+      "Computer Science"
+    ],
+    "expected_missing": [],
+    "must_not_claim": []
+  }
+}

@@ -1,0 +1,56 @@
+# ---- Secrets and local configuration ----
+.env
+.env.*
+!.env.example
+
+# ---- Personal data: never commit real profiles, resumes or exports ----
+Experience Master.*
+*.docx
+*.pdf
+uploads/
+# Full text of retrieved job postings is kept locally only (see backend/fixtures).
+backend/fixtures/jobs/live/_local_full/
+
+# ---- Screen recordings (may show personal data) ----
+*.mov
+*.mp4
+
+# ---- Python ----
+backend/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.vite/
+*.tsbuildinfo
+
+# ---- Local databases ----
+data/db/
+mongo-data/
+*.sqlite
+*.sqlite3
+*.db
+dump/
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+
+# ---- OS and editor files ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

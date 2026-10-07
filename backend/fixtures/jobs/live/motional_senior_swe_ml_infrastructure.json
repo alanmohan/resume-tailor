@@ -1,0 +1,64 @@
+{
+  "synthetic": false,
+  "slug": "motional_senior_swe_ml_infrastructure",
+  "title": "Senior Software Engineer, ML Infrastructure",
+  "company": "Motional",
+  "location": "Singapore, Central, Singapore",
+  "source_url": "https://motional.com/open-positions/?gh_jid=7869244003#/7869244003",
+  "fetch_url": "https://boards-api.greenhouse.io/v1/boards/motional/jobs/7869244003",
+  "date_retrieved": "2026-10-07",
+  "posting_last_updated": "2026-10-06",
+  "fit_category": "stretch",
+  "why_selected": "Senior infrastructure role with explicit qualifications outside the search keywords: Kubernetes is stated as a must, with 4+ years of professional experience and high-scale distributed systems. The keywords cover Docker and managed cloud deployment only, so these should be reported as gaps and never written into the resume.",
+  "selected_requirements": [
+    {
+      "kind": "required",
+      "text": "4+ years of professional software engineering experience."
+    },
+    {
+      "kind": "required",
+      "text": "BS or MS in Computer Science or a related technical field."
+    },
+    {
+      "kind": "required",
+      "text": "Hands-on experience developing and deploying applications on Kubernetes (k8s) is a must."
+    },
+    {
+      "kind": "required",
+      "text": "Experience building or working on high-scale infrastructure or distributed backend systems."
+    },
+    {
+      "kind": "required",
+      "text": "Strong proficiency in Python, Go, or a similar language."
+    },
+    {
+      "kind": "required",
+      "text": "Solid experience with a major cloud provider (AWS, GCP, Azure)."
+    },
+    {
+      "kind": "preferred",
+      "text": "Production experience with Ray, specifically leveraging Ray Data and Ray Train."
+    },
+    {
+      "kind": "preferred",
+      "text": "Experience with GPU management or orchestration infrastructure, such as warm pools, smart scheduling, or specialized GPU frameworks."
+    }
+  ],
+  "selection_hypothesis": {
+    "note": "Guesses made from the broad search keywords used to pick this posting, not from the profile itself. Confirm or correct them when the posting is tested locally.",
+    "likely_supported": [
+      "Python",
+      "MS in a related field in progress",
+      "some cloud provider experience"
+    ],
+    "likely_gaps": [
+      "Kubernetes",
+      "4+ years of professional software engineering experience",
+      "high-scale infrastructure or distributed backend systems",
+      "Ray Data and Ray Train",
+      "GPU management or orchestration infrastructure"
+    ]
+  },
+  "access_notes": "Public posting; no login. Motional's own careers page (source_url) loads the listing with JavaScript, so a plain web fetch of it returned only the page shell. The listing was confirmed through Motional's official Greenhouse-hosted view (https://job-boards.greenhouse.io/embed/job_app?for=motional&token=7869244003) and the text was read from the board's public JSON API (fetch_url).",
+  "local_full_text": "_local_full/motional_senior_swe_ml_infrastructure.txt"
+}

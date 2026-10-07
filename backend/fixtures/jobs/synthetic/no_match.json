@@ -1,0 +1,39 @@
+{
+  "synthetic": true,
+  "slug": "no_match",
+  "title": "Registered Veterinary Technician",
+  "company": "Thistlewood Animal Hospital",
+  "purpose": "No match: an unrelated clinical role. Retrieval should find nothing useful and every requirement should be reported as missing, not padded with weak evidence.",
+  "description": "About the role\nThistlewood Animal Hospital is a small-animal practice looking for a Registered Veterinary Technician to join our surgical ward.\n\nResponsibilities\n- Monitor anesthesia and vital signs during surgery\n- Perform venipuncture, place intravenous catheters, and give medications\n- Take dental and full-body radiographs\n- Restrain dogs and cats safely during examinations\n- Counsel pet owners on post-operative care\n\nRequirements\n- Current Registered Veterinary Technician (RVT) license\n- 2+ years of clinical experience in a small-animal hospital\n- Experience monitoring anesthesia\n- Proficiency in venipuncture and catheter placement\n- Able to lift 50 pounds and stand for a full shift\n\nPreferred qualifications\n- Experience with dental radiography\n- Experience with exotic species\n- Experience in emergency and critical care",
+  "expected": {
+    "required_keywords": [
+      "Registered Veterinary Technician",
+      "small-animal hospital",
+      "anesthesia",
+      "venipuncture",
+      "catheter"
+    ],
+    "preferred_keywords": [
+      "dental radiography",
+      "exotic species",
+      "emergency and critical care"
+    ],
+    "expected_supported": [],
+    "expected_missing": [
+      "Registered Veterinary Technician",
+      "small-animal hospital",
+      "anesthesia",
+      "venipuncture",
+      "catheter",
+      "dental radiography",
+      "exotic species",
+      "emergency and critical care"
+    ],
+    "must_not_claim": [
+      "anesthesia",
+      "venipuncture",
+      "catheter",
+      "radiograph"
+    ]
+  }
+}

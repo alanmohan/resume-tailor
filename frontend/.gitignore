@@ -1,0 +1,27 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependencies and build output
+node_modules
+dist
+dist-ssr
+
+# Local environment files (.env.example is the committed template)
+.env
+.env.*
+!.env.example
+*.local
+
+# Test output
+coverage
+playwright-report
+test-results
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.sw?

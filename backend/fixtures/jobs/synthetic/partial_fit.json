@@ -1,0 +1,43 @@
+{
+  "synthetic": true,
+  "slug": "partial_fit",
+  "title": "Full-Stack Software Engineer",
+  "company": "Marlowe Finch Logistics",
+  "purpose": "Partial fit: the front-end, database and tooling keywords are supported, but Node.js, GraphQL and Terraform are absent from the sample profile.",
+  "description": "About the role\nMarlowe Finch Logistics makes route-planning software for regional delivery fleets. We need a Full-Stack Software Engineer to build customer-facing web features across our TypeScript stack.\n\nResponsibilities\n- Build responsive web features with React and TypeScript\n- Design and operate Node.js services and GraphQL APIs\n- Model and query data in PostgreSQL\n- Write unit tests and integration tests, and take part in code review\n- Manage cloud infrastructure on AWS with Terraform\n\nRequirements\n- 3+ years of professional software engineering experience\n- Strong React and TypeScript skills\n- Production experience with Node.js\n- Experience with PostgreSQL or another relational database\n- Experience writing unit tests\n- Experience with Docker\n\nPreferred qualifications\n- Experience with GraphQL\n- Experience with Terraform\n- Experience with AWS\n- Experience with CI/CD tools such as GitHub Actions",
+  "expected": {
+    "required_keywords": [
+      "React",
+      "TypeScript",
+      "Node.js",
+      "PostgreSQL",
+      "unit test",
+      "Docker"
+    ],
+    "preferred_keywords": [
+      "GraphQL",
+      "Terraform",
+      "AWS",
+      "GitHub Actions"
+    ],
+    "expected_supported": [
+      "React",
+      "TypeScript",
+      "PostgreSQL",
+      "unit test",
+      "Docker",
+      "AWS",
+      "GitHub Actions"
+    ],
+    "expected_missing": [
+      "Node.js",
+      "GraphQL",
+      "Terraform"
+    ],
+    "must_not_claim": [
+      "Node.js",
+      "GraphQL",
+      "Terraform"
+    ]
+  }
+}
