@@ -67,8 +67,10 @@ async def test_forwarded_address_is_used_when_proxies_are_trusted(
     async with client_for(application) as client:
         first = await client.post("/api/sessions", headers={"X-Forwarded-For": "198.51.100.1"})
         other = await client.post("/api/sessions", headers={"X-Forwarded-For": "198.51.100.2"})
+        # The proxy appends the address it saw; whatever the client sent in
+        # front of it (a forged first hop) does not give it a fresh allowance.
         again = await client.post(
-            "/api/sessions", headers={"X-Forwarded-For": "198.51.100.1, 10.0.0.1"}
+            "/api/sessions", headers={"X-Forwarded-For": "10.9.8.7, 198.51.100.1"}
         )
     assert (first.status_code, other.status_code, again.status_code) == (201, 201, 429)
 

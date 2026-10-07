@@ -44,6 +44,27 @@ def _blank_to_none(value: object) -> object:
     return value
 
 
+BROKEN_CHARACTER_MESSAGE = (
+    "The text contains a broken character (half of an emoji or symbol). Remove it and try again."
+)
+
+
+def require_valid_unicode(text: str) -> str:
+    """Reject text that cannot be encoded as UTF-8.
+
+    JSON may carry half of a surrogate pair (the escape "\\ud83d" without its
+    partner, typically a cut-off emoji). Python accepts it in a string, but it
+    can be neither sent to the AI provider nor serialised again, so it would
+    fail with a server error after the quota was charged. Used by request
+    fields that are plain ``str``; the length-limited types reject it already.
+    """
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(BROKEN_CHARACTER_MESSAGE) from None
+    return text
+
+
 def required_text(max_length: int) -> type[str]:
     """Request field type: trimmed, non-empty string of at most ``max_length`` characters."""
     return Annotated[

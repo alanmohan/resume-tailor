@@ -28,6 +28,7 @@ def production(**overrides: object) -> Settings:
         "app_env": "production",
         "openai_api_key": FAKE_KEY,
         "cors_origins": "https://resume-tailor.example.com",
+        "mongodb_uri": "mongodb://db.example.invalid:27017",
     }
     values.update(overrides)
     return make(**values)
@@ -212,6 +213,7 @@ def test_production_accepts_cors_origins_from_the_environment(
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("OPENAI_API_KEY", FAKE_KEY)
     monkeypatch.setenv("CORS_ORIGINS", "https://resume-tailor.example.com")
+    monkeypatch.setenv("MONGODB_URI", "mongodb://db.example.invalid:27017")
     settings = make()
     assert settings.app_env == "production"
     assert settings.cors_origins == ["https://resume-tailor.example.com"]

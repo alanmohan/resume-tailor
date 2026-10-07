@@ -10,7 +10,8 @@ from app.schemas.documents import EvidenceDoc, ProfileDoc, SourceDoc
 from app.schemas.profiles import ProfileBullet, ProfileRecord
 from app.services.indexing import (
     CHUNK_MAX_WORDS,
-    CHUNK_MIN_WORDS,
+    SUMMARY_MAX_WORDS,
+    SUMMARY_MIN_WORDS,
     UNLOCATED_SOURCE_LABEL,
     USER_SOURCE_LABELS,
     USER_SOURCE_TYPE,
@@ -177,7 +178,9 @@ def test_context_is_not_a_source_of_tags() -> None:
         provenance="user_added",
     )
     evidence = build(make_profile(OWNER, records=[record]), [])
-    assert [item.tags for item in evidence] == [[], []]
+    # Overview and bullet carry no tag although the title says "Python"; the
+    # role's own skills line (third record) is what names the skill.
+    assert [item.tags for item in evidence] == [[], [], ["python"]]
 
 
 def test_user_statements_cite_the_review_instead_of_a_source() -> None:
@@ -288,11 +291,13 @@ def test_long_text_is_split_at_sentence_boundaries_into_bounded_chunks() -> None
     evidence = build(make_profile(OWNER, records=[record]), [doc])
     chunks = evidence[1:]
 
-    assert len(chunks) == 3
+    # A summary is cut into 40-120 word passages (EM-06): each 220-word
+    # paragraph gives two chunks of ten 11-word sentences.
+    assert len(chunks) == 6
     prefix = "[Platform Engineer at Acme] "
     for chunk in chunks:
         words = count_words(chunk.text.removeprefix(prefix))
-        assert CHUNK_MIN_WORDS <= words <= CHUNK_MAX_WORDS
+        assert SUMMARY_MIN_WORDS <= words <= SUMMARY_MAX_WORDS
         assert chunk.text.startswith(prefix)
         # Chunks end at a sentence boundary and keep the parent record.
         assert chunk.text.endswith("with care.")

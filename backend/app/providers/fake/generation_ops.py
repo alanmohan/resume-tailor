@@ -47,6 +47,11 @@ CLOSING_PARAGRAPH = (
 )
 
 _BULLET_MARK = re.compile(r"^[-*•‣◦·–—]\s+")
+# A statement in the first person ("I did not write down the dates") is a
+# remark to the reader of the profile. Real resumes do not print such a line as
+# a bullet, so demo mode does not either (the same rule as the server's
+# fallback bullets in drafting.fill_empty_entries).
+_FIRST_PERSON = re.compile(r"\b(?:I|[Mm]y|[Mm]e)\b")
 
 
 # ---- Text helpers ------------------------------------------------------------------
@@ -109,7 +114,8 @@ def _entries(
     evidence's original order. Evidence that only restates a record's header
     never becomes a bullet; a project retrieved by its header alone is listed
     without bullets, a role without statements is left to the server (which
-    lists every role anyway)."""
+    lists every role anyway). A statement written in the first person is a
+    remark, not an achievement, and never becomes a bullet."""
     category_of = {record.alias: record.category for record in ctx.records}
     evidence_of: dict[str, list[LLMContextEvidence]] = {}
     for item in ctx.evidence:
@@ -119,7 +125,11 @@ def _entries(
     experience: list[LLMEntryOut] = []
     projects: list[LLMEntryOut] = []
     for record_alias, items in evidence_of.items():
-        statements = [item for item in items if item.kind == "statement"]
+        statements = [
+            item
+            for item in items
+            if item.kind == "statement" and not _FIRST_PERSON.search(item.text)
+        ]
         chosen = {
             item.alias
             for item in _most_relevant_first(statements, relevance)[:MAX_BULLETS_PER_RECORD]
@@ -227,10 +237,12 @@ def _coverage_item(
     requirement: LLMContextRequirement, tokens: dict[str, set[str]]
 ) -> LLMCoverageOut:
     """Keyword overlap: all keywords found in the evidence -> supported, some ->
-    partial, none -> missing. A requirement without keywords cannot be rated
-    this way: it is missing when not one of its own words occurs in the
-    evidence, and uncertain otherwise."""
-    keywords = list(dict.fromkeys(tokenize(" ".join(requirement.keywords))))
+    partial, none -> missing. A keyword counts as a whole: "github actions" is
+    found when one evidence record contains both words, and the rationale
+    names it as the job analysis wrote it. A requirement without keywords
+    cannot be rated this way: it is missing when not one of its own words
+    occurs in the evidence, and uncertain otherwise."""
+    keywords = [keyword for keyword in dict.fromkeys(requirement.keywords) if tokenize(keyword)]
     if not keywords:
         words = set(tokenize(requirement.text))
         if any(words & evidence_words for evidence_words in tokens.values()):
@@ -247,20 +259,21 @@ def _coverage_item(
     found: list[str] = []
     citing: list[str] = []
     for keyword in keywords:
-        alias = next((alias for alias in ordered if keyword in tokens[alias]), None)
+        words = set(tokenize(keyword))
+        alias = next((alias for alias in ordered if words <= tokens[alias]), None)
         if alias is not None:
             found.append(keyword)
             if alias not in citing:
                 citing.append(alias)
     absent = [keyword for keyword in keywords if keyword not in found]
 
+    mentions = f"The cited evidence mentions {_join_names(found)}"
     if not found:
         status, rationale = "missing", "No evidence was found in the supplied profile."
     elif absent:
-        status = "partial"
-        rationale = f"The cited evidence mentions {', '.join(found)} but not {', '.join(absent)}."
+        status, rationale = "partial", f"{mentions} but not {_join_names(absent)}."
     else:
-        status, rationale = "supported", f"The cited evidence mentions {', '.join(found)}."
+        status, rationale = "supported", f"{mentions}."
     return LLMCoverageOut(
         requirement=requirement.alias,
         status=status,

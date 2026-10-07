@@ -136,18 +136,21 @@ async def test_invented_kubernetes_experience_never_reaches_the_documents(
 
     # Coverage is decided by the evidence, not by the model's rating.
     coverage = {item["requirement_id"]: item for item in body["coverage"]}
-    assert coverage["req-k8s"]["status"] == "uncertain"
-    assert coverage["req-k8s"]["rationale"] == "The cited evidence does not mention: Kubernetes."
+    # Kubernetes is nowhere in the profile, so the requirement is missing.
+    assert (coverage["req-k8s"]["status"], coverage["req-k8s"]["evidence_ids"]) == ("missing", [])
+    assert coverage["req-k8s"]["rationale"].startswith(
+        "No evidence of Kubernetes was found in the supplied profile."
+    )
     assert coverage["req-docker"]["status"] == "supported"
     assert coverage["req-docker"]["evidence_ids"] == [seeded.evidence_id("b-docker")]
     assert coverage["req-python"]["status"] == "uncertain"  # rated without evidence
     assert body["coverage_summary"] == {
         "supported": 1,
         "partial": 0,
-        "missing": 0,
-        "uncertain": 2,
-        "assessed": 1,
-        "percent": 100.0,
+        "missing": 1,
+        "uncertain": 1,
+        "assessed": 2,
+        "percent": 50.0,
     }
     assert any("4 statement(s)" in warning for warning in body["warnings"])
 
@@ -409,12 +412,16 @@ async def test_invented_employer_title_and_dates_cannot_reach_the_document(
     documents = str(body["resume"]) + str(body["cover_letter"])
     for invented in ("Initech", "Principal Engineer", "Director", "2012", "2019"):
         assert invented not in documents
-    # The project is filed under projects, not employment, with its confirmed
-    # header only: its bullet cited a role's evidence and was removed.
-    assert all(e["record_id"] != "project-trail" for e in experience)
-    assert [(p["heading"], p["subheading"], p["bullets"]) for p in body["resume"]["projects"]] == [
-        ("TrailNotes", "Personal project", [])
+    # The role the model wrote nothing for shows its own confirmed bullet, not
+    # a bare heading.
+    assert [(b["text"], b["validation_status"]) for b in experience[1]["bullets"]] == [
+        ("Built Python data pipelines for 5,000 daily records.", "supported")
     ]
+    # The project is not presented as employment. Its only bullet cited a
+    # role's evidence and was removed, and an optional entry is not printed as
+    # a bare heading, so the project is left out.
+    assert all(e["record_id"] != "project-trail" for e in experience)
+    assert body["resume"]["projects"] == []
     omitted = {claim["text"]: claim["reason"] for claim in body["omitted_claims"]}
     assert set(omitted) == {
         "Principal Engineer at Initech, 2012 - 2020.",

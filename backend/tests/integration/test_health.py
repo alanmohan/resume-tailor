@@ -15,6 +15,14 @@ MakeSettings = Callable[..., Settings]
 
 # Nothing listens on port 9 (the "discard" port), so connections fail quickly.
 UNREACHABLE_URI = "mongodb://127.0.0.1:9"
+# The non-sensitive input limits, reported for the Start page (SPEC-05).
+DEFAULT_LIMITS = {
+    "max_profile_chars": 60_000,
+    "max_job_chars": 25_000,
+    "max_sources": 5,
+    "max_requirements": 25,
+    "session_ttl_hours": 24,
+}
 
 
 async def test_healthz_reports_ok(client: httpx.AsyncClient) -> None:
@@ -32,6 +40,7 @@ async def test_readyz_reports_ready_without_calling_the_provider(
         "status": "ready",
         "checks": {"database": "ok", "provider": "configured"},
         "provider_mode": "fake",
+        "limits": DEFAULT_LIMITS,
     }
     assert sum(fake_provider.calls.values()) == 0
 
@@ -63,6 +72,7 @@ async def test_unreachable_database_keeps_liveness_but_fails_readiness(
         "status": "not_ready",
         "checks": {"database": "unavailable", "provider": "configured"},
         "provider_mode": "fake",
+        "limits": DEFAULT_LIMITS,
     }
     error = assert_error(create, 503, "database_unavailable")
     assert error["retryable"] is True
@@ -84,6 +94,7 @@ async def test_missing_provider_key_fails_readiness_only(
         "status": "not_ready",
         "checks": {"database": "ok", "provider": "not_configured"},
         "provider_mode": "openai",
+        "limits": DEFAULT_LIMITS,
     }
 
 

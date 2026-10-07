@@ -37,6 +37,7 @@ from app.schemas.profiles import (
     IndexProgress,
     IndexState,
     Profile,
+    ProfileNotice,
     ProfileRecord,
     ProfileSourceSummary,
     ProfileStatus,
@@ -135,6 +136,8 @@ class ProfileDoc(MongoDocument):
     contact: Contact = Field(default_factory=Contact)
     records: list[ProfileRecord] = Field(default_factory=list)
     conflicts: list[Conflict] = Field(default_factory=list)
+    # Non-blocking remarks about the whole profile (app/services/ingestion.py).
+    notices: list[ProfileNotice] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
@@ -162,6 +165,7 @@ class ProfileDoc(MongoDocument):
             contact=self.contact,
             records=self.records,
             conflicts=self.conflicts,
+            notices=self.notices,
             sources=[source.to_summary() for source in sources],
             review_summary=self.review_summary(),
             created_at=self.created_at,

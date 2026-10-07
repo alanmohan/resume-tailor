@@ -12,7 +12,9 @@ Pipeline (the "R" of this application's retrieval-augmented generation):
 3. Each query keeps a few candidates, spread over different roles/projects.
 4. The candidates of all queries are merged into one bounded context: no
    duplicates, at most RETRIEVAL_MAX_CONTEXT records and RETRIEVAL_TOKEN_BUDGET
-   estimated tokens.
+   estimated tokens. Once every query has its best candidate in, each
+   confirmed role gets one statement of its own while there is room, so the
+   model can write about every role.
 
 Ranking scores are similarity measures used for ordering only. They never
 leave this module and are not confidence values: whether a requirement is
@@ -37,6 +39,7 @@ from app.services.textutil import (
     strip_contact_details,
     tokenize,
 )
+from app.services.validation import singular_tokens
 
 # Constant of reciprocal rank fusion. 60 is the value from the original RRF
 # paper (Cormack et al., 2009); it keeps one top rank from dominating the sum.
@@ -47,6 +50,10 @@ CANDIDATE_POOL_FACTOR = 3
 # Preferred maximum number of candidates per query from one role or project.
 MAX_PER_PARENT = 2
 ROLE_QUERY_MAX_CHARS = 600
+EMPLOYMENT_CATEGORY = "employment"
+# Limit used to rank a whole profile for the role query. Far above
+# MAX_EVIDENCE_CHUNKS (200 by default), so no evidence record is cut off.
+WHOLE_PROFILE = 10_000
 
 
 @dataclass(frozen=True)
@@ -161,7 +168,8 @@ class _LoadedEvidence:
 
     documents: list[EvidenceDoc]  # vectors removed
     matrix: np.ndarray  # one row per document
-    token_sets: list[set[str]]  # words of text and tags, for keyword overlap
+    # Words of text and tags in singular form, for keyword overlap.
+    token_sets: list[frozenset[str]]
 
 
 class PythonRetriever:
@@ -187,7 +195,10 @@ class PythonRetriever:
     ) -> list[ScoredEvidence]:
         """Hybrid ranking: reciprocal rank fusion (see reciprocal_rank_fusion)
         of the semantic rank (cosine similarity of embeddings) and the keyword
-        rank (share of the query's keywords found in the evidence text and tags)."""
+        rank (share of the query's keywords found in the evidence text and tags).
+
+        Keywords and evidence words are compared in singular form, so a
+        requirement for "REST APIs" matches a bullet about "a REST API"."""
         if len(query.vector) != filters.embedding_dimension:
             raise ValueError("query vector does not have the index's embedding dimension")
         loaded = await self._load(owner_id, profile_version, filters)
@@ -195,9 +206,8 @@ class PythonRetriever:
             return []
 
         similarities = cosine_similarities(np.asarray(query.vector, dtype=float), loaded.matrix)
-        keyword_scores = [
-            keyword_overlap(set(query.keywords), tokens) for tokens in loaded.token_sets
-        ]
+        keywords = set(singular_tokens(" ".join(query.keywords)))
+        keyword_scores = [keyword_overlap(keywords, set(tokens)) for tokens in loaded.token_sets]
         fused = reciprocal_rank_fusion([_ranking(similarities.tolist()), _ranking(keyword_scores)])
         best = sorted(fused, key=lambda index: (-fused[index], index))[:limit]
         return [
@@ -244,7 +254,7 @@ class PythonRetriever:
             documents=[document.model_copy(update={"embedding": None}) for document in documents],
             matrix=np.asarray([document.embedding for document in documents], dtype=float),
             token_sets=[
-                set(tokenize(document.text)) | set(tokenize(" ".join(document.tags)))
+                singular_tokens(document.text) | singular_tokens(" ".join(document.tags))
                 for document in documents
             ],
         )
@@ -287,28 +297,54 @@ def diversify_by_parent(
     return [ranked[index] for index in sorted(picked)]
 
 
+def best_statement_per_role(ranked: list[ScoredEvidence]) -> list[EvidenceDoc]:
+    """The best-ranked bullet of every employment record in ``ranked``, best
+    first. Only bullets count: the record of a role's header (title, dates)
+    shows that the role exists but gives the model nothing to write about."""
+    best: dict[str, EvidenceDoc] = {}
+    for candidate in ranked:
+        evidence = candidate.evidence
+        if evidence.category == EMPLOYMENT_CATEGORY and evidence.bullet_id is not None:
+            best.setdefault(_parent_key(evidence), evidence)
+    return list(best.values())
+
+
 def select_context(
-    candidate_lists: list[list[ScoredEvidence]], max_records: int, token_budget: int
+    candidate_lists: list[list[ScoredEvidence]],
+    max_records: int,
+    token_budget: int,
+    role_statements: list[EvidenceDoc] | None = None,
 ) -> list[EvidenceDoc]:
     """Merge the candidates of all queries into one bounded context.
 
     Round robin: first every query's best candidate, then every query's second
     best, and so on. Each requirement therefore gets its strongest evidence in
-    before any requirement gets a second record. A record is skipped when it
-    is already selected (deduplication by evidence_id) or would exceed the
-    token budget; selection stops at ``max_records``. The result is returned
-    in profile order so evidence of the same role stays together.
+    before any requirement gets a second record.
+
+    ``role_statements`` (see best_statement_per_role) come right after the
+    first round. A bullet may only cite evidence of its own role, so a role
+    with nothing in the context cannot get a tailored bullet. They do not
+    come first because a requirement without its best evidence could no
+    longer be rated as covered.
+
+    A record is skipped when it is already selected (deduplication by
+    evidence_id) or would exceed the token budget; selection stops at
+    ``max_records``. The result is returned in profile order so evidence of
+    the same role stays together.
     """
     deepest = max((len(candidates) for candidates in candidate_lists), default=0)
-    round_robin = [
-        candidates[rank].evidence
+    rounds = [
+        [candidates[rank].evidence for candidates in candidate_lists if rank < len(candidates)]
         for rank in range(deepest)
-        for candidates in candidate_lists
-        if rank < len(candidates)
+    ]
+    ordered = [
+        *(rounds[0] if rounds else []),
+        *(role_statements or []),
+        *(evidence for later_round in rounds[1:] for evidence in later_round),
     ]
     selected: dict[str, EvidenceDoc] = {}
     tokens_used = 0
-    for evidence in round_robin:
+    for evidence in ordered:
         if len(selected) == max_records:
             break
         cost = estimate_tokens(evidence.text)
@@ -351,7 +387,9 @@ async def retrieve_for_job(
     """Retrieve the evidence context for generating documents for ``job``.
 
     Makes exactly one provider call: all query texts (one per requirement,
-    then the role query) are embedded together.
+    then the role query) are embedded together. The role query ranks the
+    whole profile, which also tells which statement of each role fits the
+    job best (see select_context).
     """
     texts = [requirement.text for requirement in job.requirements] + [role_query_text(job)]
     keyword_sets = [
@@ -360,18 +398,26 @@ async def retrieve_for_job(
     ] + [frozenset(tokenize(texts[-1]))]
     vectors, usage = await provider.embed([embedded_query_text(text) for text in texts])
 
-    candidate_lists = []
-    for text, vector, keywords in zip(texts, vectors, keyword_sets, strict=True):
-        ranked = await retriever.retrieve(
-            owner_id,
-            profile_version,
-            RetrievalQuery(text=text, vector=vector, keywords=keywords),
-            filters,
-            limit=per_requirement * CANDIDATE_POOL_FACTOR,
-        )
-        candidate_lists.append(diversify_by_parent(ranked, per_requirement))
+    queries = [
+        RetrievalQuery(text=text, vector=vector, keywords=keywords)
+        for text, vector, keywords in zip(texts, vectors, keyword_sets, strict=True)
+    ]
+    pool = per_requirement * CANDIDATE_POOL_FACTOR
+    rankings = [
+        await retriever.retrieve(owner_id, profile_version, query, filters, limit=pool)
+        for query in queries[:-1]
+    ]
+    # The last query is the role query.
+    role_ranking = await retriever.retrieve(
+        owner_id, profile_version, queries[-1], filters, limit=WHOLE_PROFILE
+    )
+    candidate_lists = [
+        diversify_by_parent(ranked[:pool], per_requirement) for ranked in [*rankings, role_ranking]
+    ]
 
-    context = select_context(candidate_lists, max_context, token_budget)
+    context = select_context(
+        candidate_lists, max_context, token_budget, best_statement_per_role(role_ranking)
+    )
     selected_ids = {evidence.evidence_id for evidence in context}
     candidates_by_requirement = {
         requirement.requirement_id: [

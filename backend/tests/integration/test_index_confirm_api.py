@@ -202,6 +202,7 @@ async def test_only_changed_statements_are_embedded_after_an_edit(
     session = await create_session()
     confirmed = await confirmed_profile(client, session.headers, simple_sources())
     old_version = confirmed["version"]
+    old = await evidence_documents(db, session.owner_id, old_version)
     body = patch_body(confirmed)
     body["records"][0]["bullets"][1]["text"] = "Cut report time from 3 hours to 15 minutes"
     edited = (await client.patch("/api/profile", json=body, headers=session.headers)).json()
@@ -225,11 +226,12 @@ async def test_only_changed_statements_are_embedded_after_an_edit(
         "user_edited",
         "extracted",
     ]
-    # Versions are never mixed: the old version's evidence is still complete
-    # and separate, with different IDs.
-    old = await evidence_documents(db, session.owner_id, old_version)
+    # Versions are never mixed: the new version has its own documents with
+    # different IDs. The old version's evidence is removed once the new one is
+    # indexed, because no draft was written from it (SEC-1).
     assert len(old) == 4
     assert not {document["_id"] for document in old} & {document["_id"] for document in new}
+    assert await evidence_documents(db, session.owner_id, old_version) == []
 
 
 async def test_vectors_of_another_embedding_model_are_never_reused(

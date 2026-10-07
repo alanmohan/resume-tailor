@@ -45,7 +45,7 @@ from app.schemas.evidence import Evidence
 from app.schemas.generations import Generation
 from app.schemas.jobs import Job
 from app.schemas.profiles import Profile
-from app.services.coverage import MAX_RATIONALE_CHARS, MISSING_RATIONALE
+from app.services.coverage import MAX_RATIONALE_CHARS, MISSING_ADVICE, MISSING_RATIONALE
 from app.services.textutil import locate_quote, normalize_whitespace
 from tests.conftest import TEST_MONGODB_URI, TEST_ORIGIN, assert_test_database, client_for
 from tests.helpers_flow import (
@@ -727,8 +727,15 @@ async def test_flow_b_coverage_reports_the_gaps(
         if names_a_gap and not names_something_shown:
             assert item["status"] in GAP_STATUSES, text
         if item["status"] == "missing":
-            # A gap in the supplied text, not a verdict on the person.
-            assert (item["rationale"], item["evidence_ids"]) == (MISSING_RATIONALE, [])
+            # A gap in the supplied text, not a verdict on the person. The
+            # sentence is the server's own: the general one when the model
+            # rated the requirement missing, or one naming the keyword when
+            # the server found it nowhere in the profile.
+            assert item["evidence_ids"] == []
+            assert item["rationale"] == MISSING_RATIONALE or (
+                item["rationale"].startswith("No evidence of ")
+                and item["rationale"].endswith(f"in the supplied profile. {MISSING_ADVICE}")
+            ), item["rationale"]
     assert about_kubernetes
     stretch, close = kubernetes_draft["coverage_summary"], close_fit_draft["coverage_summary"]
     assert stretch["missing"] + stretch["uncertain"] > close["missing"] + close["uncertain"]

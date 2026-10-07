@@ -31,6 +31,12 @@ class GenerationRepository(OwnedRepository[GenerationDoc]):
         )
         return [self._from_mongo(raw) async for raw in cursor]
 
+    async def profile_versions(self, owner_id: str) -> list[int]:
+        """The profile versions the owner's stored drafts were written from.
+        Their evidence must be kept: a draft cites it and is revalidated
+        against it even after the profile has changed."""
+        return await self._collection.distinct("profile_version", {"owner_id": owner_id})
+
     async def find_by_idempotency_key(
         self, owner_id: str, idempotency_key: str
     ) -> GenerationDoc | None:

@@ -152,7 +152,9 @@ async def test_delete_session_revokes_the_token(
     stored = await db["sessions"].find_one({"_id": session.session_id})
     assert stored is not None and stored["revoked_at"] is not None
     assert_error(await client.get("/api/session", headers=session.headers), 401, "unauthorized")
-    assert_error(await client.delete("/api/session", headers=session.headers), 401, "unauthorized")
+    # Clearing may be repeated (a retry after a database error); see SEC-2 in
+    # tests/integration/test_fix_platform_clear_retry.py.
+    assert (await client.delete("/api/session", headers=session.headers)).status_code == 200
 
 
 async def test_revoking_one_session_does_not_affect_another(

@@ -2,16 +2,16 @@
 repositories (the MongoDB-backed behaviour is covered in tests/integration)."""
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
+from starlette.requests import Request
 
 from app.errors import QuotaExceeded, RateLimited, SessionExpired, Unauthorized
 from app.ratelimit import (
     DAY,
     SESSION_CREATE_WINDOW,
     QuotaService,
-    client_ip,
+    client_address,
     hash_client_ip,
     seconds_until,
     window_bounds,
@@ -124,21 +124,27 @@ def test_ip_hash_is_keyed_and_does_not_contain_the_address() -> None:
     assert len(first) == 32
 
 
-def fake_request(peer: str | None, forwarded_for: str | None = None) -> SimpleNamespace:
-    headers = {"x-forwarded-for": forwarded_for} if forwarded_for else {}
-    client = SimpleNamespace(host=peer) if peer else None
-    return SimpleNamespace(headers=headers, client=client)
+def fake_request(peer: str | None, forwarded_for: str | None = None) -> Request:
+    headers = [(b"x-forwarded-for", forwarded_for.encode())] if forwarded_for else []
+    client = (peer, 50000) if peer else None
+    return Request({"type": "http", "headers": headers, "client": client})
 
 
 def test_forwarded_header_is_ignored_unless_proxies_are_trusted() -> None:
     request = fake_request("10.0.0.5", "198.51.100.9, 10.0.0.1")
-    assert client_ip(request, trust_proxy_headers=False) == "10.0.0.5"  # type: ignore[arg-type]
-    assert client_ip(request, trust_proxy_headers=True) == "198.51.100.9"  # type: ignore[arg-type]
+    untrusted = build_test_settings(trust_proxy_headers=False)
+    trusted = build_test_settings(trust_proxy_headers=True)
+    assert client_address(request, untrusted).ip == "10.0.0.5"
+    # The entry the trusted proxy appended (the last one), not the leftmost
+    # entry, which arrives with the request and can be forged (SEC-3).
+    assert client_address(request, trusted).ip == "10.0.0.1"
 
 
 def test_client_ip_falls_back_when_information_is_missing() -> None:
-    assert client_ip(fake_request("10.0.0.5"), trust_proxy_headers=True) == "10.0.0.5"  # type: ignore[arg-type]
-    assert client_ip(fake_request(None), trust_proxy_headers=False) == "unknown"  # type: ignore[arg-type]
+    trusted = build_test_settings(trust_proxy_headers=True)
+    untrusted = build_test_settings(trust_proxy_headers=False)
+    assert client_address(fake_request("10.0.0.5"), trusted).ip == "10.0.0.5"
+    assert client_address(fake_request(None), untrusted).ip == "unknown"
 
 
 # ---- session creation limit --------------------------------------------------------

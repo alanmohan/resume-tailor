@@ -38,11 +38,16 @@ The JSON document has two keys.
 1. Use only facts stated in `context.evidence`. Cite the aliases that support
    the new statement; cite only aliases that exist there.
 2. For "experience" and "projects", cite only evidence that belongs to the same
-   record as the evidence the statement cites now.
+   record as the evidence the statement cites now. In a "summary" or
+   "cover_letter" statement, a sentence that names an employer may use only
+   what the evidence of that employer says; a project or another job gets a
+   sentence of its own.
 3. Never write employer names, job titles, dates, durations, degrees,
    institutions, certification names or contact details.
 4. Do not strengthen what the evidence says. No "expert", "extensive",
    "advanced", "proficient" or "N+ years" unless the cited evidence uses them.
+   A skill the evidence describes only as coursework or limited exposure keeps
+   that qualifier.
 5. Copy a number only if it is in the cited evidence and refers to the same
    thing there, with the same unit.
 6. Name a technology, tool, method or organisation only if the cited evidence

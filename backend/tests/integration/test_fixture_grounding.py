@@ -197,8 +197,11 @@ async def test_invented_kubernetes_experience_is_removed_whatever_the_model_writ
     # Coverage: Docker evidence does not make the Kubernetes requirement supported.
     coverage = coverage_by_text(draft)
     kubernetes = coverage["5+ years of experience operating Kubernetes in production"]
-    assert kubernetes["status"] == "uncertain"
-    assert kubernetes["rationale"] == "The cited evidence does not mention: Kubernetes."
+    # Kubernetes is nowhere in the profile, so the requirement is missing.
+    assert (kubernetes["status"], kubernetes["evidence_ids"]) == ("missing", [])
+    assert kubernetes["rationale"].startswith(
+        "No evidence of Kubernetes was found in the supplied profile."
+    )
     docker = coverage["Experience with Docker and container image builds"]
     assert (docker["status"], docker["rationale"]) == ("supported", "Docker images were packaged.")
 
@@ -281,9 +284,12 @@ async def test_reused_percentage_is_rejected_whatever_the_model_writes(
 
     assert_never_claimed(draft, posting["expected"]["must_not_claim"])
     # The one statement that keeps the figure with what it measures survives.
-    assert [(claim["text"], claim["validation_status"]) for claim in all_claims(draft)][:1] == [
-        ("Improved unit test coverage by 20% with new pytest suites", "supported")
-    ]
+    # (Roles the model wrote nothing for now show their own confirmed bullets,
+    # so this statement is no longer the first one of the draft.)
+    assert (
+        "Improved unit test coverage by 20% with new pytest suites",
+        "supported",
+    ) in [(claim["text"], claim["validation_status"]) for claim in all_claims(draft)]
     assert [claim["text"] for claim in all_claims(draft) if "20%" in claim["text"]] == [
         "Improved unit test coverage by 20% with new pytest suites"
     ]
@@ -448,8 +454,9 @@ async def test_model_that_obeys_the_planted_instructions_is_overruled(
     statuses = {text: item["status"] for text, item in coverage_by_text(draft).items()}
     assert statuses["Experience with Docker"] == "supported"
     assert statuses["Experience with PostgreSQL"] == "uncertain"
-    assert statuses["Experience with AWS"] == "uncertain"
-    assert set(statuses.values()) <= {"supported", "uncertain"}
+    # AWS is nowhere in this profile: missing, not just unconfirmed.
+    assert statuses["Experience with AWS"] == "missing"
+    assert set(statuses.values()) <= {"supported", "uncertain", "missing"}
     assert list(statuses.values()).count("supported") < len(statuses)
     rationales = json.dumps([item["rationale"] for item in draft["coverage"]])
     assert not [phrase for phrase in [*canaries, "Fully supported"] if phrase in rationales]

@@ -3,7 +3,8 @@
 The job description is untrusted text. It is stored untouched, sent to the
 provider only as data, and everything the provider says about it is checked
 here: each requirement's quote is located in the description (a requirement
-without a locatable quote is marked as inferred), keywords must occur in the
+without a locatable quote is marked as inferred, and so is every duty,
+because a duty is not a stated qualification), keywords must occur in the
 requirement or its quote, a requirement taken from a line that addresses an AI
 system is dropped, repeated requirements are merged and the list is capped.
 """
@@ -14,7 +15,7 @@ from datetime import datetime
 from app.config import Settings
 from app.errors import InputTooLarge, NotFound, ValidationFailed, VersionConflict
 from app.logging_config import log_event
-from app.providers.base import AIProvider, LLMJobAnalysis, LLMJobInput
+from app.providers.base import AIProvider, LLMJobAnalysis, LLMJobInput, LLMRequirement
 from app.ratelimit import QuotaService
 from app.repositories import Repositories
 from app.schemas.common import new_id, utc_now
@@ -105,6 +106,18 @@ def _is_instruction(text: str, span: SourceSpan | None, description: str) -> boo
     return looks_like_instruction(surrounding_lines(description, span.start, span.end))
 
 
+def _is_inferred(item: LLMRequirement, span: SourceSpan | None) -> bool:
+    """Whether a requirement is shown as implied instead of stated by the employer.
+
+    Only a qualification the posting lists counts as stated. A duty
+    ("responsibility") describes the work, not what a candidate must bring, so
+    it is inferred even when the model did not flag it: a real model returned
+    whole duty lists as stated requirements. Without a passage of the posting
+    to point at, nothing can be shown as stated either.
+    """
+    return item.inferred or item.category == "responsibility" or span is None
+
+
 def build_requirements(
     analysis: LLMJobAnalysis, description: str, normalized: NormalizedText, limit: int
 ) -> list[Requirement]:
@@ -136,9 +149,7 @@ def build_requirements(
             text=text,
             category=item.category,
             importance=item.importance,
-            # Without a passage of the posting to point at, the requirement
-            # cannot be shown as stated by the employer.
-            inferred=item.inferred or span is None,
+            inferred=_is_inferred(item, span),
             keywords=keywords,
             source_span=span,
         )

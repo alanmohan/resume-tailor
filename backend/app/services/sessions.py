@@ -11,6 +11,19 @@ from app.schemas.sessions import DeletedCounts, Limits
 from app.security import SessionContext, generate_token, hash_token
 
 
+def limits_of(settings: Settings) -> Limits:
+    """The input limits the frontend validates against and shows to the
+    visitor. They are plain numbers from the configuration, nothing secret, so
+    GET /readyz may report them before a session exists."""
+    return Limits(
+        max_profile_chars=settings.max_profile_chars,
+        max_job_chars=settings.max_job_chars,
+        max_sources=settings.max_sources,
+        max_requirements=settings.max_requirements,
+        session_ttl_hours=settings.session_ttl_hours,
+    )
+
+
 class SessionService:
     def __init__(
         self, repos: Repositories, settings: Settings, provider_mode: ProviderMode
@@ -20,13 +33,7 @@ class SessionService:
         self.provider_mode = provider_mode
 
     def limits(self) -> Limits:
-        return Limits(
-            max_profile_chars=self._settings.max_profile_chars,
-            max_job_chars=self._settings.max_job_chars,
-            max_sources=self._settings.max_sources,
-            max_requirements=self._settings.max_requirements,
-            session_ttl_hours=self._settings.session_ttl_hours,
-        )
+        return limits_of(self._settings)
 
     async def create(self) -> tuple[str, SessionDoc]:
         """Create a session and return ``(token, stored session)``.
@@ -54,6 +61,10 @@ class SessionService:
         Revoking first means the token stops working before any data is
         removed, and requests still in flight will notice (see
         guard_after_write) instead of writing data back after the deletion.
+
+        Safe to repeat: revoking an already revoked session changes nothing,
+        and the delete pass removes whatever an earlier, interrupted attempt
+        left behind. The counts are those of this call.
         """
         await self._repos.sessions.revoke(session.session_id, utc_now())
         return await self._repos.delete_all_for_owner(session.owner_id)

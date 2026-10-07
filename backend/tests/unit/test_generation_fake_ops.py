@@ -108,6 +108,28 @@ def test_bullets_are_evidence_text_grouped_under_the_right_record() -> None:
     assert "Graduated with honours." not in written
 
 
+def test_first_person_remark_is_never_printed_as_a_bullet() -> None:
+    # Found by driving demo mode with the sample notes: a remark the user left
+    # for themselves was listed as an achievement of the role.
+    remark = "I did not write down the dates; it was part-time while I was at university"
+    with_remark = context(
+        evidence=[
+            evidence("E1", "P1", "Rebuilt the events page as a static site with Docker."),
+            evidence("E2", "P1", remark),
+            evidence("E3", "P2", "Kept my own notes on the design."),
+        ]
+    )
+    output = generate_documents(with_remark, None)
+
+    assert [bullet.text for bullet in output.experience[0].bullets] == [
+        "Rebuilt the events page as a static site with Docker."
+    ]
+    # A project whose only statement is a remark is listed without bullets and
+    # left to the server (drafting.fill_empty_entries), like a header-only one.
+    assert [(entry.record, entry.bullets) for entry in output.projects] == [("P2", [])]
+    assert remark not in " ".join(paragraph.text for paragraph in output.cover_letter)
+
+
 def test_record_header_evidence_never_becomes_a_bullet() -> None:
     ctx = context(
         records=[

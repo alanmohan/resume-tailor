@@ -9,7 +9,9 @@ reviewed profile; it is compared with the stored one item by item:
 - an untouched item keeps its provenance, source reference and review flag.
 
 Any change increases the version and puts the profile back into draft, so it
-has to be confirmed and indexed again before documents can be generated.
+has to be confirmed and indexed again before documents can be generated. The
+profile-level notices follow the edit: adding a name, a contact detail or an
+education entry removes the notice about its absence.
 """
 
 from datetime import datetime
@@ -31,7 +33,7 @@ from app.schemas.profiles import (
     ProfileRecordInput,
 )
 from app.security import SessionContext
-from app.services.ingestion import unique_texts
+from app.services.ingestion import notices_after_edit, unique_texts
 
 # The record fields a user can edit; a change to any of them makes the record user_edited.
 RECORD_FIELDS = (
@@ -188,6 +190,7 @@ def apply_patch(stored: ProfileDoc, body: ProfilePatchRequest, now: datetime) ->
             "contact": contact,
             "records": records,
             "conflicts": conflicts,
+            "notices": notices_after_edit(stored.notices, contact, records),
             "updated_at": now,
         }
     )

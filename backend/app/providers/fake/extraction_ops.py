@@ -11,6 +11,11 @@ The rules read plain text in common resume and job-posting layouts:
 - a record starts with a header line such as ``Title - Company (dates)``,
   ``Title | Company | dates`` or ``Title, Company`` followed by a date line;
 - statements are bullet lines starting with ``-``, ``*`` or a bullet glyph;
+- plain text between a header and its first bullet is the record's summary,
+  however many paragraphs it has;
+- under a record, ``Key technologies: A, B`` lists its skills, ``Role: ...``
+  and ``Status: ...`` are statements, and a short line ending in a colon
+  (``Outcomes and metrics:``) only labels the list below it;
 - skills are comma-separated lists with an optional ``Category:`` prefix.
 
 Like the real model, the fake copies text verbatim (it never rewrites or
@@ -114,6 +119,14 @@ _PLACE = r"[A-Z][A-Za-z.'-]*(?: [A-Z][A-Za-z.'-]*)*"
 # "City, ST" or "City, State, Country".
 _LOCATION = re.compile(rf"{_PLACE}, ?{_PLACE}(?:, ?{_PLACE})?")
 _NOT_A_NAME = frozenset({"curriculum vitae", "resume", "cv"})
+# Lines under a record. "Key technologies: Python, Ray" lists its skills.
+_RECORD_SKILLS = re.compile(
+    r"^(?:key technologies|technologies|tech stack|tools)\s*:\s*(?P<list>\S.*)$", re.IGNORECASE
+)
+# A labelled detail that fits no field ("Role: First author") is a statement.
+_RECORD_DETAIL = re.compile(r"^(?:role|status)\s*:\s*\S", re.IGNORECASE)
+# "Outcomes and metrics:" only introduces the list below it.
+MAX_LIST_LABEL_WORDS = 4
 
 
 @dataclass(frozen=True)
@@ -135,6 +148,8 @@ class _RecordDraft:
     bullets: list[str] = field(default_factory=list)
     summary_lines: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
+    # Labelled lines such as "Role: First author", kept whole as statements.
+    details: list[str] = field(default_factory=list)
 
 
 def _parse_header(line: str, next_line: str | None) -> _Header | None:
@@ -239,6 +254,9 @@ def _read_record_line(
             current.bullets.append(bullet["text"])
         return current
 
+    if current is not None and _read_labelled_line(line, current):
+        return current
+
     header = _parse_header(line, next_line)
     if header:
         current = _RecordDraft(category=category, header=header, quote=line)
@@ -263,6 +281,21 @@ def _read_record_line(
     return current
 
 
+def _read_labelled_line(line: str, current: _RecordDraft) -> bool:
+    """Handle a ``Label: ...`` line under a record; False when ``line`` is not
+    one. A technology list becomes the record's skills, a role or status line
+    is kept whole as a statement (it fits no field and must not be lost), and
+    a short label with nothing after the colon is skipped."""
+    record_skills = _RECORD_SKILLS.match(line)
+    if record_skills:
+        current.skills.extend(_split_list(record_skills["list"]))
+        return True
+    if _RECORD_DETAIL.match(line):
+        current.details.append(line)
+        return True
+    return line.endswith(":") and len(line.split()) <= MAX_LIST_LABEL_WORDS
+
+
 def _to_llm_record(draft: _RecordDraft, alias: str) -> LLMRecord:
     """The record in the shape a model would return it. Every quote is text of
     the source; a role without an employer is reported as ambiguous."""
@@ -278,7 +311,7 @@ def _to_llm_record(draft: _RecordDraft, alias: str) -> LLMRecord:
         summary=" ".join(draft.summary_lines) or None,
         source=alias,
         header_quote=draft.quote,
-        bullets=[LLMBullet(source=alias, quote=text) for text in draft.bullets],
+        bullets=[LLMBullet(source=alias, quote=text) for text in (*draft.details, *draft.bullets)],
         skills=draft.skills,
         ambiguous=role_without_employer,
         ambiguity_notes=(

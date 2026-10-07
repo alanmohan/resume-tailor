@@ -52,10 +52,10 @@ Every non-2xx response from an application route, and every 404, 405, 422 and 50
 
 | Code | Status | When | Extra fields |
 |---|---|---|---|
-| `validation_error` | 422 | Schema violation or an application-level input rule | `field_errors` (usually) |
+| `validation_error` | 422 | Schema violation or an application-level input rule, including source or job text that holds a broken character (an unpaired surrogate, "half of an emoji") | `field_errors` (usually) |
 | `too_many_chunks` | 422 | The profile would produce more evidence chunks than `MAX_EVIDENCE_CHUNKS` | `details.chunks`, `details.limit` |
 | `idempotency_key_required` | 400 | `Idempotency-Key` missing or not 8 to 128 visible ASCII characters without spaces | |
-| `unauthorized` | 401 | Token missing, malformed, unknown or revoked | |
+| `unauthorized` | 401 | Token missing, malformed, unknown or revoked. One exception: `DELETE /api/session` still accepts a revoked token until it expires, so "Clear my data" can be repeated | |
 | `session_expired` | 401 | Token valid but past `expires_at` | |
 | `not_found` | 404 | Unknown route, or an ID that is missing or not owned | |
 | `method_not_allowed` | 405 | Method not supported by the route | |
@@ -98,17 +98,28 @@ Readiness: the database answers a ping and has its indexes, and the AI provider 
 {
   "status": "ready",
   "checks": {"database": "ok", "provider": "configured"},
-  "provider_mode": "openai"
+  "provider_mode": "openai",
+  "limits": {
+    "max_profile_chars": 60000,
+    "max_job_chars": 25000,
+    "max_sources": 5,
+    "max_requirements": 25,
+    "session_ttl_hours": 24
+  }
 }
 ```
 
-`status` is `ready` or `not_ready`; `checks.database` is `ok` or `unavailable`; `checks.provider` is `configured` or `not_configured`; `provider_mode` is `openai` or `fake`.
+`status` is `ready` or `not_ready`; `checks.database` is `ok` or `unavailable`; `checks.provider` is `configured` or `not_configured`; `provider_mode` is `openai` or `fake`. `limits` is the same object as in the session responses and is present on both `200` and `503`, so a client can show the configured limits before it has a session.
+
+`checks.provider` is `not_configured` when `OPENAI_API_KEY` is absent, blank or still the placeholder from `.env.example` (a value starting with `replace-with`).
 
 ## Sessions
 
 ### `POST /api/sessions`
 
 Creates an anonymous session. No token, no body. Rate limited per client address (`SESSION_CREATE_LIMIT_PER_HOUR`).
+
+The client address is the socket peer unless `TRUST_PROXY_HEADERS=true`. Then it is taken from, in this order: the header named by `CLIENT_IP_HEADER` (if set), `CF-Connecting-IP`, `True-Client-IP`, the entry of `X-Forwarded-For` that the nearest trusted proxy appended (counted from the right with `TRUSTED_PROXY_HOPS`, default 1), and last the socket peer. The leftmost `X-Forwarded-For` entry is never trusted: the client can write it. The address is stored only as a salted hash; the log line `session_create` records which source was used (`client_ip_source`), never the address.
 
 `201`
 
@@ -145,7 +156,9 @@ Errors: `429 rate_limited` (with `Retry-After`).
 {"deleted": true, "deleted_counts": {"sources": 3, "profiles": 1, "evidence": 43, "jobs": 1, "generations": 1}}
 ```
 
-Afterwards the token answers `401 unauthorized` on every route. An operation that was still running when the data was cleared ends with 401 and leaves nothing behind.
+Afterwards the token answers `401 unauthorized` on every other route. An operation that was still running when the data was cleared ends with 401 and leaves nothing behind.
+
+The call can be repeated. If the delete pass fails part-way (`503 database_unavailable`, `retryable: true`), the token is already revoked but this one route still accepts it until it expires, so sending the same request again removes what was left. A repeat after a complete clear answers `200` with all counts `0`. An unknown or missing token is `401 unauthorized`; an expired one is `401 session_expired`.
 
 ## Profile
 
@@ -170,11 +183,11 @@ Request:
 | `sources` | 1 to `MAX_SOURCES` entries |
 | `label` | 1 to 80 characters after trimming |
 | `source_type` | `resume`, `linkedin` or `notes` |
-| `text` | not blank; stored exactly as sent. The total length of all texts may not exceed `MAX_PROFILE_CHARS`. |
+| `text` | not blank and valid Unicode; stored exactly as sent. The total length of all texts may not exceed `MAX_PROFILE_CHARS`. |
 
-`200` [Profile](#profile-1) with `status: "draft"`. Ingesting again replaces the sources and the draft, keeps `profile_id` and increases `version`.
+`200` [Profile](#profile-1) with `status: "draft"`. Ingesting again replaces the sources and the draft, keeps `profile_id` and increases `version`. `conflicts` lists what the sources disagree about (dates of a role, and a name, e-mail address or phone number that differs between sources); `notices` lists non-blocking remarks, see [Profile](#profile-1).
 
-Errors: `422 validation_error` (blank text, bad label or type, too many sources), `413 input_too_large`, `429 quota_exceeded`, `409 version_conflict` (the profile was edited while extraction was running), provider errors.
+Errors: `422 validation_error` (blank text, bad label or type, too many sources, or text with a broken character: field `sources.N.text`, message "The text contains a broken character (half of an emoji or symbol). Remove it and try again."; rejected before any quota is charged), `413 input_too_large`, `429 quota_exceeded`, `409 version_conflict` (the profile was edited while extraction was running), provider errors.
 
 ### `GET /api/profile`
 
@@ -227,6 +240,7 @@ Saves the reviewed profile. No AI call. The body carries the **whole** list of r
 - Something changed: `version` + 1, `status: "draft"`, `index_state: "not_indexed"`, `indexed_version: null`. The profile must be confirmed again before generating.
 - Nothing changed: the stored profile at the same version.
 - Changed text becomes `provenance: "user_edited"`; a new item becomes `"user_added"`.
+- The `missing_*` notices are recomputed from the edited profile, so adding a name, contact detail or education record removes its notice. `source_text_not_captured` notices stay until the sources are ingested again.
 
 Errors: `404 not_found` (no profile), `409 version_conflict`, `422 validation_error`.
 
@@ -255,11 +269,13 @@ Errors:
 
 Confirming again after a failure is safe: chunks that already have a vector are not embedded again.
 
+After a successful confirm the server deletes the session's evidence of older profile versions, except versions that a stored draft was generated from (their citations must keep opening). The `profile_indexed` log event reports the number as `pruned_chunks`.
+
 ## Evidence
 
 ### `GET /api/evidence/{evidence_id}`
 
-The source text behind a citation. Works for every `evidence_id` that appears in one of the caller's drafts, including evidence of an older profile version cited by a stale draft.
+The source text behind a citation. Works for every `evidence_id` that appears in one of the caller's drafts, including evidence of an older profile version cited by a stale draft. Evidence of an older version that no stored draft was generated from is deleted at the next confirm and then answers `404 not_found`.
 
 `200`
 
@@ -284,6 +300,9 @@ The source text behind a citation. Works for every `evidence_id` that appears in
 | `source.source_type` | `resume`, `linkedin`, `notes`; `user` for a statement the user wrote or edited during review (`source_id`, `start`, `end` are `null`); `unknown` when the source span was not located |
 | `provenance` | `extracted`, `user_edited` or `user_added` |
 | `parent` | The role, project or other record the evidence belongs to |
+| `category` | The kind of evidence. A role, project or publication that lists skills has one extra record with `category: "skill"` whose `parent` is that role or project: `text` is `[context] Skills: a, b, c` and `excerpt` is the source line that names them (or `Skills: a, b, c` when no single line does) |
+
+A summary longer than 120 words is split into several evidence records of about 40 to 120 words at line breaks and sentence groups, each with its own source span; bullets are split only above 250 words.
 
 Embedding vectors are never returned.
 
@@ -297,11 +316,11 @@ Analyses a job description into editable requirements. One AI call; counts again
 
 Request: `{"description": "...", "company": "Fernhollow AI", "title": "Applied Machine Learning Engineer"}`
 
-`description` must not be blank and may not exceed `MAX_JOB_CHARS`; it is stored exactly as sent. `company` and `title` are optional (up to 200 characters; blank becomes `null`).
+`description` must not be blank, must be valid Unicode and may not exceed `MAX_JOB_CHARS`; it is stored exactly as sent. `company` and `title` are optional (up to 200 characters; blank becomes `null`).
 
 `201` [Job](#job) at `version: 1`.
 
-Errors: `422 validation_error`, `413 input_too_large`, `429 quota_exceeded`, provider errors.
+Errors: `422 validation_error` (including a broken character in `description`, rejected before any quota is charged), `413 input_too_large`, `429 quota_exceeded`, provider errors.
 
 ### `GET /api/jobs`
 
@@ -345,7 +364,7 @@ A generation is one draft: a resume, a cover letter and a coverage table for one
 
 ### `POST /api/generations`
 
-Retrieves evidence and generates the draft. The call is synchronous and can take a minute or more. Counts against `QUOTA_GENERATION`; makes two to four provider calls (query embedding, draft, at most one correction pass, optional verifier).
+Retrieves evidence and generates the draft. The call is synchronous and can take a minute or more. Counts against `QUOTA_GENERATION`; makes two to four provider calls (query embedding, draft, at most one correction pass, optional verifier). The correction pass runs only when a statement that can be rewritten was rejected; a rejected skill alone is dropped and listed in `omitted_claims` without a second model call.
 
 Header: `Idempotency-Key: <8 to 128 visible ASCII characters, no spaces>` (required). Use a new key for each user action and the same key when retrying that action.
 
@@ -396,6 +415,8 @@ Checks every statement the user edited against the evidence it cites. Text is ne
 
 `200` [Generation](#generation) with `revision` + 1, `validation.state: "validated"`, `validation.validated_at` set and `validation.user_edited_count: 0`. Each edited item ends as `supported`, `needs_review`, `unsupported` or (connective cover-letter text) `not_applicable`; its `user_edited` flag stays `true`.
 
+An edited cover-letter paragraph that cites no evidence keeps `not_applicable` only when it is a plain greeting or closing. Anything else becomes `needs_review` with the warning "You edited this paragraph and it cites no evidence, so it could not be checked against your profile. Make sure everything it says about you is true." and counts in `validation.needs_review_count`.
+
 The check uses the evidence of the profile version the draft was generated from, so a stale draft can still be validated.
 
 Errors: `404 not_found`, `409 generation_in_progress`, `409 version_conflict` (the draft changed concurrently), `422 validation_error` (the generation has no documents), `429 quota_exceeded`.
@@ -432,10 +453,13 @@ Profile {
   contact: Contact
   records: [ProfileRecord]
   conflicts: [Conflict]
+  notices: [ProfileNotice]
   sources: [{ source_id, label, source_type, char_count: int, revision: int }]
   review_summary: { needs_review_count: int, unresolved_conflict_count: int }
   created_at, updated_at, expires_at: iso
 }
+
+ProfileNotice { code: str, message: str }
 
 Contact { name, email, phone, location: str | null, links: [str] }
 
@@ -463,11 +487,22 @@ Conflict {
 }
 ```
 
-- A record with category `skill` is a skill group: `title` is the group label and `skills` holds the list.
+- A record with category `skill` is a skill group: `title` is the group label and `skills` holds the list. Every entry of `skills`, in any record, is one skill name: if the model returns a whole labelled line ("Backend: Python, Flask."), ingestion stores its items ("Python", "Flask") instead.
 - Dates are free text exactly as written in the source.
 - `SourceRef.start` and `end` are offsets into the original pasted text, and `excerpt` is that slice.
 - The profile is ready for generation when `status == "confirmed"`, `index_state == "indexed"` and `indexed_version == version`.
 - `review_summary.needs_review_count` counts flagged records plus flagged bullets. Only unresolved conflicts block confirmation.
+- `Conflict.field` is the record field the sources disagree about (`start_date`, `end_date`, ...) or, for contact details that differ between sources, `contact_name`, `contact_email` or `contact_phone` with `record_ids: []`. Contact values are compared by meaning (e-mail ignoring case, phone by its digits, a name with or without a middle name). A disagreement the model and the server both report is listed once.
+- `notices` is always present (an empty list when there is nothing to report) and never blocks confirmation. Codes:
+
+  | `code` | When | Example `message` |
+  |---|---|---|
+  | `source_text_not_captured` | One per source: lines of the pasted text that ended up in no record. Shows at most three excerpts of 120 characters and counts the rest | `2 lines of Resume were not captured: "..."; "...". Add anything that matters to a record.` |
+  | `missing_name` | The profile has no name | |
+  | `missing_contact_details` | Neither an e-mail address nor a phone number | |
+  | `missing_education` | No education record | |
+
+  The message is plain text and may contain the user's own source lines; render it as text.
 
 ### Job
 
@@ -494,7 +529,7 @@ Requirement {
 }
 ```
 
-`source_span` offsets refer to `description`. `inferred` is true when the requirement is implied rather than stated, or when no passage of the posting could be located for it.
+`source_span` offsets refer to `description`. `inferred` is true when the requirement is implied rather than stated, or when no passage of the posting could be located for it. A requirement with category `responsibility` (a duty) is always returned as `inferred: true` by job analysis, whatever the model says, so duties are the first to go when the list is capped at `MAX_REQUIREMENTS`.
 
 ### Generation
 
@@ -557,11 +592,16 @@ CoverageItem {
 Reading a draft:
 
 - **Headers are server-composed.** `heading`, `subheading`, `location` and `date_range` of every `ResumeEntry` are copied from the confirmed profile record (`heading` is the title, `subheading` the organisation). The model writes only bullets, summary lines, skills choices and cover-letter paragraphs.
-- `experience` lists every confirmed employment record in profile order, even with no bullets. `projects` holds the project, publication and achievement records chosen for the job. `education` and `certifications` are confirmed text, unchanged.
-- Every `evidence_id` can be opened with `GET /api/evidence/{id}`. IDs cited by skills, education and certifications may lie outside `retrieved_evidence_ids`.
+- `experience` lists every confirmed employment record in profile order. A role the model wrote no bullet for, or whose bullets were all removed, gets up to two of its own confirmed bullets word for word (or its summary when it has no bullets), as ordinary `supported` claims with citations that can be edited or regenerated. Bullets written in the first person are skipped; a role with nothing usable keeps its bare heading.
+- `projects` holds the project, publication and achievement records chosen for the job. An entry without bullets is left out unless its confirmed record has neither bullets nor a summary (a title-only publication or achievement). `education` and `certifications` are confirmed text, unchanged.
+- Every `evidence_id` can be opened with `GET /api/evidence/{id}`. IDs cited by skills, education and certifications may lie outside `retrieved_evidence_ids`. `retrieved_evidence_ids` is the retrieval selection in profile order, followed by the evidence cited by any fallback bullets.
+- `resume.skills[]` items can be `needs_review` as well as `supported`: a skill the profile mentions only as coursework or limited exposure carries the warning `Your profile mentions "X" only as coursework or limited exposure.` A skill listed under a role or project (not only in a skills section) is supported and cites that record.
+- Other server-written `needs_review` warnings on statements: `This sentence names <organisation> but relies on evidence from another role or project.` (summary and cover letter), `This bullet repeats most of another bullet of the same entry. Keep only one of them.`, and `"<phrase>" is stronger or more specific than the wording of the cited evidence.` (now also for seniority words such as senior, principal, lead engineer or tech lead that the evidence does not use).
 - Greeting and closing paragraphs of the cover letter have `validation_status: "not_applicable"` and no citations.
 - **Initial generation removes unsupported statements** and lists them in `omitted_claims`. An `unsupported` item can be present in a stored draft only after a validate or regenerate call.
 - Before exporting, check `validation.state == "validated"`, `validation.unsupported_count == 0`, and have the user acknowledge any `needs_review_count > 0`.
-- `coverage_summary.assessed = supported + partial + missing`; `percent = round(100 * (supported + 0.5 * partial) / assessed, 1)`, or `null` when nothing was assessed. It measures evidence coverage only: it is not a suitability, ATS or hiring score. A `missing` rationale always says that no evidence was found in the supplied profile.
+- `coverage_summary.assessed = supported + partial + missing`; `percent = round(100 * (supported + 0.5 * partial) / assessed, 1)`, or `null` when nothing was assessed. It measures evidence coverage only: it is not a suitability, ATS or hiring score.
+- `CoverageItem.status` is the model's rating after the server's check, which can only lower it. `missing` items have `evidence_ids: []` and a server-written rationale: `No evidence for this requirement was found in the supplied profile. That does not mean you lack it: add it to your profile if you have it.` when the model rated it missing, or `No evidence of <keyword> was found in the supplied profile. That does not mean you lack it: ...` when the server found the requirement's only keyword nowhere in the confirmed profile.
+- `CoverageItem.rationale` is the model's sentence when it only uses names, keywords and figures from the requirement, the cited evidence and the job's title and company. When the server lowers a rating it keeps that sentence and appends its reason, naming whole phrases in the posting's order: `... The cited evidence mentions Python and FastAPI but not REST APIs, so this is rated partial.` or `... The cited evidence does not mention Terraform, Helm or Kafka, so this rating could not be confirmed.` A lowered rationale can therefore be longer than 600 characters. A duty or general statement with nothing checkable that the model rated partial becomes `uncertain` with `This requirement describes a duty or a general quality rather than something a profile can show, so it is not counted as covered.`
 - `warnings` are draft-level sentences, for example that citations were ignored or statements were left out.
 - `model` is the generation model that produced the draft (`fake-llm-1` in demo mode). `usage` accumulates over the generation and later regenerations.

@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Request
@@ -39,19 +40,60 @@ DAY = timedelta(days=1)
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
-def client_ip(request: Request, trust_proxy_headers: bool) -> str:
-    """The caller's IP address.
+# Headers in which a platform reports the client address in a single value
+# that it overwrites itself: Cloudflare (in front of Render), then Akamai and
+# Cloudflare Enterprise.
+PLATFORM_IP_HEADERS = ("cf-connecting-ip", "true-client-ip")
+FORWARDED_FOR_HEADER = "x-forwarded-for"
+SOCKET_SOURCE = "socket"
 
-    Behind Render's proxy the socket peer is the proxy, so when
-    ``trust_proxy_headers`` is on the first X-Forwarded-For hop is used. The
-    header is ignored otherwise, because without a trusted proxy in front any
-    client could put whatever it likes there.
+
+@dataclass(frozen=True)
+class ClientAddress:
+    """The caller's IP address and where it was read from. ``source`` is a
+    header name or "socket": safe to log, unlike the address itself."""
+
+    ip: str
+    source: str
+
+
+def _forwarded_hop(request: Request, trusted_hops: int) -> str | None:
+    """The address the outermost trusted proxy saw, taken from X-Forwarded-For.
+
+    Every proxy APPENDS the address it received the request from, so only the
+    last ``trusted_hops`` entries were written by proxies we trust. Everything
+    to their left arrived with the request and can be forged by the client:
+    the leftmost entry is never used. None when the header is shorter than
+    the number of trusted proxies.
     """
-    if trust_proxy_headers:
-        first_hop = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        if first_hop:
-            return first_hop
-    return request.client.host if request.client else "unknown"
+    values = request.headers.getlist(FORWARDED_FOR_HEADER)
+    hops = [hop.strip() for value in values for hop in value.split(",") if hop.strip()]
+    return hops[-trusted_hops] if len(hops) >= trusted_hops else None
+
+
+def client_address(request: Request, settings: Settings) -> ClientAddress:
+    """The caller's IP address for the session rate limit.
+
+    Without TRUST_PROXY_HEADERS the socket peer is used and every header is
+    ignored, because with no trusted proxy in front a client could send any
+    header it likes. Behind a platform proxy the socket peer is the proxy, so
+    the address is read from what the platform itself sets, in this order:
+
+    1. the header named by CLIENT_IP_HEADER, if configured;
+    2. a single-value platform header (PLATFORM_IP_HEADERS);
+    3. X-Forwarded-For, counted from the right (see _forwarded_hop);
+    4. the socket peer.
+    """
+    if settings.trust_proxy_headers:
+        configured = [settings.client_ip_header] if settings.client_ip_header else []
+        for name in (*configured, *PLATFORM_IP_HEADERS):
+            value = request.headers.get(name, "").strip()
+            if value:
+                return ClientAddress(value, name)
+        hop = _forwarded_hop(request, settings.trusted_proxy_hops)
+        if hop:
+            return ClientAddress(hop, FORWARDED_FOR_HEADER)
+    return ClientAddress(request.client.host if request.client else "unknown", SOCKET_SOURCE)
 
 
 def hash_client_ip(ip: str, key: bytes) -> str:

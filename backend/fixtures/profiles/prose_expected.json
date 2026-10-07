@@ -1,0 +1,72 @@
+{
+  "description": "Facts tests may assert about prose_profile.txt. The person, employers, venue and project are invented.",
+  "source_file": "prose_profile.txt",
+  "records": [
+    {
+      "category": "employment",
+      "title": "Research Software Engineer",
+      "organization": "Pellwater Hydrology Lab",
+      "date_string": "Sep 2022 - Present",
+      "summary_paragraph_starts": ["I joined Pellwater Hydrology Lab", "In my second year"],
+      "skills": ["Python", "PyTorch", "FastAPI", "PostgreSQL", "Docker"],
+      "statements": [
+        "Role: Technical lead for the forecasting tools group",
+        "Reduced the mean absolute error of the 48-hour river-level forecast from 31 cm to 19 cm",
+        "Cut the nightly retraining run from 5 hours to 70 minutes by caching feature windows",
+        "Moved 14 regional water offices onto the new forecasting API"
+      ]
+    },
+    {
+      "category": "employment",
+      "title": "Data Analyst",
+      "organization": "Corrin Vale Transit Authority",
+      "date_string": "Jun 2020 - Aug 2022",
+      "summary_paragraph_starts": ["I started as the only analyst"],
+      "skills": ["SQL", "pandas", "Tableau"],
+      "statements": [
+        "Built a ridership dashboard used by 22 planners",
+        "Automated 9 weekly reports that had been assembled by hand"
+      ]
+    },
+    {
+      "category": "publication",
+      "title": "Gauge-Aware Sequence Models for Short-Horizon River Forecasting",
+      "organization": "Northern Hydroinformatics Workshop",
+      "date_string": "2024",
+      "summary_paragraph_starts": ["We show that conditioning a sequence model"],
+      "skills": [],
+      "statements": [
+        "Status: Accepted, presented as a contributed talk",
+        "Role: First author",
+        "Lowered forecast error by 0.12 normalised RMSE on 37 held-out catchments",
+        "Released a benchmark of 410,000 hourly gauge readings",
+        "Matched the accuracy of the operational baseline with one third of the training data"
+      ]
+    },
+    {
+      "category": "project",
+      "title": "Floodline Notebook",
+      "organization": "Personal project",
+      "date_string": "Mar 2023 - Jun 2023",
+      "summary_paragraph_starts": [],
+      "skills": [],
+      "statements": [
+        "Role: Sole developer",
+        "Built a small web app that plots 3 years of rainfall for any postcode",
+        "Wrote the tile cache that keeps map loads under 400 ms"
+      ]
+    },
+    {
+      "category": "skill",
+      "title": "Languages",
+      "organization": null,
+      "date_string": null,
+      "summary_paragraph_starts": [],
+      "skills": ["Python", "SQL", "R"],
+      "statements": []
+    }
+  ],
+  "list_labels": ["Outcomes and metrics:"],
+  "contact": {"name": null, "email": null, "phone": null, "location": null, "links": []},
+  "expected_notice_codes": ["missing_name", "missing_contact_details", "missing_education"]
+}

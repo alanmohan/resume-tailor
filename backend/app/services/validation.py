@@ -88,6 +88,26 @@ _SENTENCE_LEAD_IN = frozenset(" \t\"'“”‘’([•*-")
 _SENTENCE_END = frozenset(".!?:;\n")
 # "20", "5,000", "3x", "5k", "10+", "2nd", "1990s": quantities and ordinals, not names.
 _NUMBER_LIKE = re.compile(r"\d[\d.,]*(?:st|nd|rd|th|s|x|k|m|mm|b|bn)?\+?")
+# Units that are commonly typed directly behind a figure: "420ms", "1.4GB".
+_ATTACHED_UNITS = (
+    "ns ms sec secs min mins hr hrs kb mb gb tb pb kbps mbps gbps hz khz mhz ghz rps qps tps fps"
+).split()
+_ATTACHED_UNIT_PATTERN = re.compile(
+    rf"(?<![\w.])(\d[\d,]*(?:\.\d+)?)({'|'.join(_ATTACHED_UNITS)})\b", re.IGNORECASE
+)
+
+
+def separate_units(text: str) -> str:
+    """Write a figure and the unit attached to it apart: "420ms" becomes
+    "420 ms" and "1.4GB" becomes "1.4 GB".
+
+    Statements and evidence are both read through this, so the figure is
+    compared as a figure and the unit as a word, whichever way either side was
+    typed. Without it "420ms" is one word with a digit in it, which looks like
+    an invented product name. Only the listed units are split off, so names
+    that contain digits ("3D", "2FA", "S3") stay whole.
+    """
+    return _ATTACHED_UNIT_PATTERN.sub(r"\1 \2", text)
 
 
 def _singular(token: str) -> str:
@@ -114,14 +134,25 @@ _NAME_ENDINGS = ("ized", "ised", "izing", "ising", "ize", "ise", "ed", "ing")
 
 # Words found in almost every job posting. They say nothing checkable about a
 # candidate, so they are never treated as requirement keywords.
+_POSTING_WORDS = (
+    "ability able background candidate demonstrated equivalent excellent experience "
+    "experienced familiar familiarity good great including knowledge minimum plus "
+    "preferred proven related relevant required requirements role skills solid strong "
+    "team understanding using work working years"
+)
+# The halves of compound descriptors: "front-end", "back-end", "full-stack",
+# "hands-on", "real-time", "large-scale", "high-performance", "low-level",
+# "cross-functional", "fast-paced", "well-tested", "tool set". Keywords are
+# split at hyphens and spaces, and on their own these halves are everyday
+# words ("end users", "response time"). Requiring them in the evidence removed
+# honest statements, so they are generic too. A compound that names a
+# technology ("React Native") is made of other words and stays checkable.
+_DESCRIPTOR_FRAGMENTS = (
+    "front end back full stack hands large scale real time high low level performance "
+    "cross functional fast paced well set tool tooling"
+)
 GENERIC_JOB_WORDS = frozenset(
-    _singular(word)
-    for word in (
-        "ability able background candidate demonstrated equivalent excellent experience "
-        "experienced familiar familiarity good great including knowledge minimum plus "
-        "preferred proven related relevant required requirements role skills solid strong "
-        "team understanding using work working years"
-    ).split()
+    _singular(word) for word in f"{_POSTING_WORDS} {_DESCRIPTOR_FRAGMENTS}".split()
 )
 
 # Words of a salutation or sign-off that are capitalised by convention.
@@ -144,7 +175,7 @@ class Vocabulary:
 
     @classmethod
     def of(cls, texts: Iterable[str]) -> "Vocabulary":
-        tokens = {token for text in texts for token in tokenize(text)}
+        tokens = {token for text in texts for token in tokenize(separate_units(text))}
         return cls(
             exact=frozenset(_singular(token) for token in tokens),
             stems=frozenset(_stem(token) for token in tokens),
@@ -222,6 +253,7 @@ def find_terms(text: str, requirement_keywords: frozenset[str]) -> list[Term]:
     clusters ...") is only caught when it is also a requirement keyword,
     because it cannot be told apart from an ordinary first word ("Built ...").
     """
+    text = separate_units(text)
     terms: dict[str, Term] = {}
     for position, word, token in _candidate_words(text):
         key = _singular(token)
@@ -241,8 +273,10 @@ def requirement_terms(text: str, keywords: list[str]) -> dict[str, str]:
     compared, the value (the requirement's own spelling where it has one) is
     for messages shown to the user.
     """
+    text = separate_units(text)
     keyword_words = {
-        _singular(token): word for _, word, token in _candidate_words(" ".join(keywords))
+        _singular(token): word
+        for _, word, token in _candidate_words(separate_units(" ".join(keywords)))
     }
     text_words = {_singular(token): word for _, word, token in _candidate_words(text)}
     keys = set(keyword_words) | {term.key for term in find_terms(text, frozenset())}
@@ -266,10 +300,12 @@ class GroundingContext:
     profile: Vocabulary
     # Union of requirement_terms() over the job's requirements.
     requirement_keywords: frozenset[str]
-    # Job title, company and candidate name: allowed in the cover letter only.
+    # Words of the job title, company and candidate name. The cover letter may
+    # use them without evidence, with the exception made by letter_allowances.
     letter_terms: frozenset[str]
-    # The job title and company exactly as written. A figure inside one of
-    # them ("SDE 2", "3M") names the job; it is not a claim about the candidate.
+    # The job title and company exactly as written. In a cover letter a full
+    # mention of one of them names the job; its words and figures ("SDE 2",
+    # "3M") are not claims about the candidate.
     job_names: tuple[str, ...] = ()
 
 
@@ -304,6 +340,12 @@ def spell_numbers_as_digits(text: str) -> str:
     return _NUMBER_WORD_PATTERN.sub(replace, text)
 
 
+def _plain_figures(text: str) -> str:
+    """``text`` with every figure in the form find_numbers reads: digits
+    instead of number words, and units written apart ("420 ms")."""
+    return spell_numbers_as_digits(separate_units(text))
+
+
 _NUMBER_PATTERN = re.compile(
     r"""
     (?<![\w.])                                   # not inside a word ("p95") or a decimal
@@ -312,8 +354,8 @@ _NUMBER_PATTERN = re.compile(
     (?P<decimal>\.\d+)?
     (?:(?P<suffix>k|mm|m|bn|b)\b|\ (?P<magnitude>hundred|thousand|million|billion)\b)?
     (?P<plus>\+)?
-    (?:\ ?(?P<percent>%|percent\b|pct\b)|(?P<times>x\b|×|\ times\b|[- ]fold\b))?
-    (?!\w)                                       # "2nd", "3D" and "100ms" are words
+    (?:\ ?(?P<percent>%|per\ ?cent\b|pct\b)|(?P<times>x\b|×|\ times\b|[- ]fold\b))?
+    (?!\w|\.\d)                                  # "2nd" and "3D" are words; no "1" in "1.4XB"
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -350,12 +392,16 @@ _CHANGE_STEMS = frozenset(
 # How many words on each side of a figure in a statement are compared.
 CLAIM_CONTEXT_WORDS = 5
 # How many content words on each side of a figure in the evidence say what it
-# measures. Deliberately fewer than on the statement's side: in "Improved unit
-# test coverage by 20% by adding pytest suites for the billing module" the
-# figure measures "unit test coverage"; the clause that follows says how the
-# result was achieved. With a wider window its words would make an unrelated
-# statement ("lowered the AWS bill by 20%") look as if it were about the same thing.
+# measures. Deliberately fewer than on the statement's side, so that words
+# further along the sentence do not make an unrelated statement look as if it
+# were about the same thing.
 EVIDENCE_CONTEXT_WORDS = 3
+# Words that open the clause saying how a result was achieved. In "Improved
+# unit test coverage by 20% by adding pytest suites" the figure measures "unit
+# test coverage"; "by adding pytest suites" is the method. A statement that
+# keeps the method but changes the result ("Reduced cloud costs by 20% by
+# adding pytest suites") must not pass because the methods match.
+_METHOD_CLAUSE = re.compile(r"\b(?:by|through|via|using|with)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -372,7 +418,7 @@ class NumberMention:
 
 def find_numbers(text: str) -> list[NumberMention]:
     """Every figure in ``text`` (which should already be passed through
-    spell_numbers_as_digits)."""
+    _plain_figures)."""
     mentions = []
     for match in _NUMBER_PATTERN.finditer(text):
         value = float(match["digits"].replace(",", "") + (match["decimal"] or ""))
@@ -413,11 +459,19 @@ def _content_stems(tokens: Iterable[str]) -> set[str]:
     return stems - _CHANGE_STEMS
 
 
-def _claim_context(text: str, mention: NumberMention) -> set[str]:
-    """Stems of the few content words on each side of a figure in a statement."""
+def _tokens_after_figure(after: str, *, with_method: bool) -> list[str]:
+    """Tokens of the text that follows a figure. Unless ``with_method`` is set
+    they stop where the clause begins that says how the result was achieved."""
+    return tokenize(after if with_method else _METHOD_CLAUSE.split(after, maxsplit=1)[0])
+
+
+def _claim_context(text: str, mention: NumberMention, *, with_method: bool = False) -> set[str]:
+    """Stems of the few content words around a figure in a statement that say
+    what it measures: those before it and those after it up to the method
+    clause (or including it, ``with_method``)."""
     before = tokenize(text[: mention.start])[-CLAIM_CONTEXT_WORDS:]
-    after = tokenize(text[mention.end :])[:CLAIM_CONTEXT_WORDS]
-    return _content_stems(before + after)
+    after = _tokens_after_figure(text[mention.end :], with_method=with_method)
+    return _content_stems(before + after[:CLAIM_CONTEXT_WORDS])
 
 
 def _nearest_content_stems(tokens: Iterable[str]) -> set[str]:
@@ -431,16 +485,37 @@ def _nearest_content_stems(tokens: Iterable[str]) -> set[str]:
     return stems
 
 
-def _evidence_context(text: str, mention: NumberMention) -> set[str]:
-    """Stems of the content words next to a figure in the evidence: the nearest
-    few on each side, without leaving the sentence (or line) that holds it."""
+def _evidence_context(text: str, mention: NumberMention, *, with_method: bool = False) -> set[str]:
+    """Stems of the content words next to a figure in the evidence that say
+    what it measures: the nearest few before it and the nearest few after it
+    up to the method clause (or including it, ``with_method``), without
+    leaving the sentence (or line) that holds the figure."""
     start, end = 0, len(text)
     for sentence in split_sentences(text):
         if sentence.start <= mention.start < sentence.end:
             start, end = sentence.start, sentence.end
     before = tokenize(text[start : mention.start])
-    after = tokenize(text[mention.end : end])
+    after = _tokens_after_figure(text[mention.end : end], with_method=with_method)
     return _nearest_content_stems(reversed(before)) | _nearest_content_stems(after)
+
+
+def _about_the_same_thing(
+    claim: str, mention: NumberMention, occurrences: list[tuple[str, NumberMention]]
+) -> bool:
+    """Whether a statement uses a figure for what the evidence uses it for.
+
+    The words that say what was measured are compared; the clause that says
+    how it was achieved is left out on both sides. A statement that only says
+    how ("a 20% gain through rightsizing") is compared on the method instead,
+    and one with no describing words at all cannot be contradicted this way.
+    """
+    measured = _claim_context(claim, mention)
+    only_method = not measured
+    context = measured or _claim_context(claim, mention, with_method=True)
+    return not context or any(
+        context & _evidence_context(text, found, with_method=only_method)
+        for text, found in occurrences
+    )
 
 
 def number_findings(
@@ -451,18 +526,18 @@ def number_findings(
 
     "About the same thing" means: the words around the figure in the statement
     share at least one content word with the words right next to the figure in
-    the evidence. So "Improved API latency by 20%" is rejected when the cited
-    evidence says "Reduced cloud costs by 20%": the figure is there, but it
-    measures something else. A figure with no describing words around it
-    ("a 20% improvement") cannot be contradicted this way and is accepted when
-    the figure itself is in the evidence.
+    the evidence (see _about_the_same_thing). So "Improved API latency by 20%"
+    is rejected when the cited evidence says "Reduced cloud costs by 20%": the
+    figure is there, but it measures something else. A figure with no
+    describing words around it ("a 20% improvement") cannot be contradicted
+    this way and is accepted when the figure itself is in the evidence.
 
     ``only_with_unit`` restricts the check to metrics such as "20%", "3x" or
     "$2M" and skips bare counts; coverage uses it for requirement texts, where
     a bare number is often a version ("Python 3") rather than a result.
     """
-    claim = spell_numbers_as_digits(claim)
-    evidence = [spell_numbers_as_digits(text) for text in cited_texts]
+    claim = _plain_figures(claim)
+    evidence = [_plain_figures(text) for text in cited_texts]
     occurrences = [(text, mention) for text in evidence for mention in find_numbers(text)]
 
     findings: list[Finding] = []
@@ -472,10 +547,9 @@ def number_findings(
         same = [(text, found) for text, found in occurrences if _same_quantity(mention, found)]
         if not same:
             message = f'"{mention.raw}" does not appear in the cited evidence.'
+        elif _about_the_same_thing(claim, mention, same):
+            continue
         else:
-            context = _claim_context(claim, mention)
-            if not context or any(context & _evidence_context(text, found) for text, found in same):
-                continue
             message = f'"{mention.raw}" appears in the cited evidence, but about something else.'
         finding = Finding("unsupported", message)
         if finding not in findings:
@@ -526,6 +600,9 @@ _ESCALATION_PATTERN = re.compile(
       | advanced
       | mastery | mastered
       | seasoned | veteran | specialist
+      | senior | principal
+      | lead\s+(?:engineer|developer|architect|designer|scientist|analyst|researcher)
+      | (?:tech|technical|team|engineering)\s+lead
       | highly\s+(?:skilled|experienced)
       | deep(?:ly)?\s+(?:knowledge|experience|experienced|expertise|understanding|familiar)
       | in[- ]depth
@@ -543,7 +620,8 @@ def _squash(text: str) -> str:
 
 
 def find_escalations(text: str) -> list[str]:
-    """Phrases that claim a level of expertise or a length of service."""
+    """Phrases that claim a level of expertise, a level of seniority ("senior",
+    "principal", "lead engineer") or a length of service."""
     phrases: list[str] = []
     for match in _ESCALATION_PATTERN.finditer(spell_numbers_as_digits(text)):
         phrase = " ".join(match.group().split())
@@ -552,10 +630,22 @@ def find_escalations(text: str) -> list[str]:
     return phrases
 
 
-def escalation_findings(claim: str, cited_texts: list[str]) -> list[Finding]:
-    """Wording such as "expert", "extensive experience" or "5+ years" must be
-    used literally by the cited evidence. Otherwise the statement may turn
-    familiarity into expertise, so it needs review."""
+def _made_of(phrase: str, words: frozenset[str]) -> bool:
+    """True when every word of ``phrase`` is one of ``words`` (singular tokens)."""
+    return all(_singular(word) in words for word in phrase.lower().split())
+
+
+def escalation_findings(
+    claim: str, cited_texts: list[str], allowed: frozenset[str] = frozenset()
+) -> list[Finding]:
+    """Wording such as "expert", "extensive experience", "senior" or "5+ years"
+    must be used literally by the cited evidence, which includes the title of
+    the role it belongs to. Otherwise the statement may turn familiarity into
+    expertise or an engineer into a senior engineer, so it needs review.
+
+    ``allowed`` holds the words a cover letter may take from the job's own
+    title: "Senior" in a letter for a "Senior Platform Engineer" job names the
+    job, not the candidate's level."""
     evidence = _squash("\n".join(cited_texts))
     return [
         Finding(
@@ -563,7 +653,7 @@ def escalation_findings(claim: str, cited_texts: list[str]) -> list[Finding]:
             f'"{phrase}" is stronger or more specific than the wording of the cited evidence.',
         )
         for phrase in find_escalations(claim)
-        if phrase.lower() not in evidence
+        if phrase.lower() not in evidence and not _made_of(phrase, allowed)
     ]
 
 
@@ -572,11 +662,30 @@ def escalation_findings(claim: str, cited_texts: list[str]) -> list[Finding]:
 
 def without_job_names(text: str, grounding: GroundingContext) -> str:
     """``text`` with every exact mention of the job title and company blanked
-    out, for the figure checks of a cover letter. "I am applying for the SDE 2
-    role at 3M" then contains no figure, while "I led 2 teams" still does."""
+    out, for the checks of a cover letter. "I am applying for the SDE 2 role at
+    3M" then contains no figure, while "I led 2 teams" still does. Only whole
+    words are blanked, so a company called "Kube" does not hide "Kubernetes"."""
     for name in grounding.job_names:
-        text = re.sub(re.escape(name), " ", text, flags=re.IGNORECASE)
+        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", " ", text, flags=re.IGNORECASE)
     return text
+
+
+def letter_allowances(grounding: GroundingContext) -> frozenset[str]:
+    """Words a cover letter may use without evidence: the formalities and the
+    words of the job title, the company and the candidate's name.
+
+    One kind of word is left out: a word of the title or company that the job
+    also lists as a requirement and the confirmed profile does not contain.
+    "Kubernetes" in "Kubernetes Platform Engineer" names the job, but used on
+    its own it claims a skill. The full title can still be written out, because
+    without_job_names sets it aside before any word is checked.
+    """
+    unbacked = {
+        word
+        for word in grounding.letter_terms
+        if word in grounding.requirement_keywords and word not in grounding.profile.exact
+    }
+    return (grounding.letter_terms - unbacked) | LETTER_FORMALITIES
 
 
 def connective_findings(
@@ -586,18 +695,21 @@ def connective_findings(
     connective. The mark is not trusted:
 
     - a figure makes the sentence a factual claim without evidence
-      (unsupported), unless it is part of the job's own title or company name;
+      (unsupported);
     - a name, or a requirement keyword that is nowhere in the confirmed
       profile, needs review: "my kubernetes skills match this role" claims a
       skill, however the model labelled it;
-    - expertise wording needs review.
+    - expertise and seniority wording needs review.
 
-    A requirement keyword that the profile does contain is left alone. A
-    sentence about the job ("excited to work on your data pipelines")
-    naturally repeats the posting's words without claiming anything new.
+    The job's own title and company, written out in full, are set aside first:
+    naming the job is not a claim. A requirement keyword that the profile does
+    contain is left alone too. A sentence about the job ("excited to work on
+    your data pipelines") naturally repeats the posting's words without
+    claiming anything new.
     """
+    text = without_job_names(text, grounding)
     findings = []
-    if find_numbers(spell_numbers_as_digits(without_job_names(text, grounding))):
+    if find_numbers(_plain_figures(text)):
         findings.append(
             Finding("unsupported", "This sentence contains a figure but cites no evidence.")
         )
@@ -613,9 +725,10 @@ def connective_findings(
             )
         )
     for phrase in find_escalations(text):
-        findings.append(
-            Finding("needs_review", f'This sentence cites no evidence but says "{phrase}".')
-        )
+        if not _made_of(phrase, allowed):
+            findings.append(
+                Finding("needs_review", f'This sentence cites no evidence but says "{phrase}".')
+            )
     return findings
 
 
@@ -632,7 +745,7 @@ def evidence_mentioning(
     profile mentions it; the returned records become its citations. Records
     in ``preferred`` (the ones the model cited) are tried first.
     """
-    wanted = {_singular(token) for token in tokenize(name)}
+    wanted = singular_tokens(name)
     if not wanted:
         return []
     preferred = [evidence_id for evidence_id in preferred if evidence_id in evidence_tokens]
@@ -642,7 +755,7 @@ def evidence_mentioning(
 
 def singular_tokens(text: str) -> frozenset[str]:
     """Singular tokens of one evidence text, the form evidence_mentioning expects."""
-    return frozenset(_singular(token) for token in tokenize(text))
+    return frozenset(_singular(token) for token in tokenize(separate_units(text)))
 
 
 # ---- One statement -----------------------------------------------------------------
@@ -675,20 +788,20 @@ def validate_claim(
     connective_findings; everywhere else a statement without evidence is
     unsupported.
     """
-    allowed = (
-        grounding.letter_terms | LETTER_FORMALITIES if section == "cover_letter" else frozenset()
-    )
+    in_letter = section == "cover_letter"
+    allowed = letter_allowances(grounding) if in_letter else frozenset()
     if not cited_texts:
-        if factual or section != "cover_letter":
+        if factual or not in_letter:
             return ClaimVerdict("unsupported", [NO_EVIDENCE_MESSAGE])
         return _verdict(connective_findings(text, grounding, allowed), "not_applicable")
 
     # Only the cover letter may name the job, so only there is its name set aside.
-    figures_text = without_job_names(text, grounding) if section == "cover_letter" else text
+    if in_letter:
+        text = without_job_names(text, grounding)
     findings = [
-        *number_findings(figures_text, cited_texts),
+        *number_findings(text, cited_texts),
         *term_findings(text, Vocabulary.of(cited_texts), grounding, allowed),
-        *escalation_findings(text, cited_texts),
+        *escalation_findings(text, cited_texts, allowed),
     ]
     return _verdict(findings, "supported")
 

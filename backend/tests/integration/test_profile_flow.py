@@ -217,6 +217,7 @@ async def test_profile_response_has_the_contract_shape(
         "contact",
         "records",
         "conflicts",
+        "notices",
         "sources",
         "review_summary",
         "created_at",

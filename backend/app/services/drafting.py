@@ -16,9 +16,12 @@ this order:
    model cannot supply any of it.
 4. ``collect_feedback`` lists the findings for the single correction pass, and
    ``remove_unsupported`` takes out what is still unsupported afterwards.
+5. ``fill_empty_entries`` gives a confirmed role that ended without bullets its
+   own confirmed bullets, so no role is printed as a bare heading.
 """
 
-from collections.abc import Iterable
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from app.providers.base import (
@@ -32,6 +35,7 @@ from app.providers.base import (
 from app.providers.generation_models import EvidenceKind
 from app.schemas.common import new_id
 from app.schemas.documents import EvidenceDoc, ProfileDoc
+from app.schemas.evidence import EvidenceParent
 from app.schemas.generations import (
     Claim,
     CoverLetter,
@@ -43,7 +47,7 @@ from app.schemas.jobs import Requirement
 from app.schemas.profiles import ProfileRecord
 from app.services.coverage import CoverageProposal
 from app.services.indexing import statement_part
-from app.services.textutil import tokenize
+from app.services.textutil import LIMITED_EXPOSURE, fold_text, split_sentences, tokenize
 from app.services.validation import (
     ClaimVerdict,
     GroundingContext,
@@ -51,6 +55,7 @@ from app.services.validation import (
     Section,
     Vocabulary,
     evidence_mentioning,
+    find_terms,
     iter_claims,
     name_tokens,
     requirement_terms,
@@ -67,12 +72,77 @@ REGENERABLE_SECTIONS: frozenset[Section] = frozenset(
 )
 # Resume sections in which a bullet may only cite evidence of its own record.
 RECORD_BOUND_SECTIONS: frozenset[Section] = frozenset({"experience", "projects"})
+# Sections whose statements stand on their own, without a record's confirmed
+# heading above them to say where the work was done or how well a skill is known.
+FREE_STANDING_SECTIONS: frozenset[Section] = frozenset({"summary", "cover_letter"})
 
 MAX_FEEDBACK_ITEMS = 20
 MAX_FEEDBACK_TEXT_CHARS = 200
+MAX_SKILL_CITATIONS = 2
+# How many of its own confirmed bullets a role gets when it ended without any.
+FALLBACK_BULLETS_PER_ROLE = 2
+# Two bullets of one entry repeat each other when this share of the shorter
+# one's content words also occurs in the other.
+DUPLICATE_BULLET_OVERLAP = 0.75
 
 OTHER_RECORD_MESSAGE = "Evidence from a different role or project was cited and not counted."
 UNKNOWN_RECORD_REASON = "It was not listed under a confirmed role or project of your profile."
+DUPLICATE_BULLET_MESSAGE = (
+    "This bullet repeats most of another bullet of the same entry. Keep only one of them."
+)
+UNCITED_EDIT_MESSAGE = (
+    "You edited this paragraph and it cites no evidence, so it could not be checked "
+    "against your profile. Make sure everything it says about you is true."
+)
+
+# A statement in the first person ("I did not write down the dates") is a
+# remark to the reader of the profile, not an achievement to print as a bullet.
+_FIRST_PERSON = re.compile(r"\b(?:I|[Mm]y|[Mm]e)\b")
+# The salutation that may open a cover letter, up to its comma.
+_SALUTATION = re.compile(r"^\s*(?:dear|hello|hi)\b[^,.:;!?\n]*[,:]?\s*", re.IGNORECASE)
+# How a sentence that only greets, thanks or signs off begins. Anything else in
+# an uncited paragraph may be a statement about the applicant.
+COURTESY_OPENERS = (
+    "to whom it may concern",
+    "thank you",
+    "thanks",
+    "sincerely",
+    "best regards",
+    "kind regards",
+    "regards",
+    "i am writing",
+    "i am applying",
+    "i am excited",
+    "i am interested",
+    "i would welcome",
+    "i would be glad",
+    "i would be happy",
+    "i look forward",
+    "i hope",
+)
+
+
+def is_limited_exposure(text: str) -> bool:
+    """True when ``text`` says a skill is known from coursework or in passing only."""
+    return LIMITED_EXPOSURE.search(text) is not None
+
+
+def is_courtesy(text: str) -> bool:
+    """True when ``text`` only greets, thanks or signs off: after an optional
+    salutation ("Dear Hiring Manager,") every sentence begins with one of
+    COURTESY_OPENERS.
+
+    Used for a cover-letter paragraph the user edited that cites no evidence.
+    Such a paragraph cannot be checked against the profile, so it may pass
+    unreviewed only when it is recognisably a formula. The list is short on
+    purpose: an unusual closing is sent to review, which costs one look, while
+    an unchecked "I led the platform group" could put an invented
+    qualification into the letter.
+    """
+    body = _SALUTATION.sub("", text, count=1)
+    return all(
+        fold_text(sentence.text).startswith(COURTESY_OPENERS) for sentence in split_sentences(body)
+    )
 
 
 # ---- Evidence lookup ---------------------------------------------------------------
@@ -95,6 +165,19 @@ def _searchable_text(evidence: EvidenceDoc) -> str:
     return "\n".join(part for part in parts if part)
 
 
+def _is_limited_evidence(evidence: EvidenceDoc) -> bool:
+    """True when the evidence describes what it mentions as coursework or
+    passing exposure only: its own wording says so, or it is the list of a
+    skill group whose title says so. The title of a role or project is no
+    such qualifier: a bullet under "Teaching Assistant, Introductory
+    Programming" is ordinary evidence."""
+    parent = evidence.parent
+    group_title = parent.title if parent is not None and parent.category == "skill" else ""
+    return is_limited_exposure(
+        "\n".join([statement_part(evidence.text), evidence.excerpt, group_title])
+    )
+
+
 @dataclass(frozen=True)
 class EvidenceIndex:
     """All evidence of one profile version, with the forms the validators use.
@@ -103,15 +186,19 @@ class EvidenceIndex:
     documents: dict[str, EvidenceDoc]
     searchable: dict[str, str]
     tokens: dict[str, frozenset[str]]
+    # IDs of the evidence that describes what it mentions as coursework or
+    # passing exposure only (see _is_limited_evidence).
+    limited: frozenset[str]
 
     @classmethod
     def of(cls, documents: Iterable[EvidenceDoc]) -> "EvidenceIndex":
         by_id = {document.evidence_id: document for document in documents}
         searchable = {key: _searchable_text(document) for key, document in by_id.items()}
         tokens = {key: singular_tokens(text) for key, text in searchable.items()}
-        return cls(documents=by_id, searchable=searchable, tokens=tokens)
+        limited = frozenset(key for key, doc in by_id.items() if _is_limited_evidence(doc))
+        return cls(documents=by_id, searchable=searchable, tokens=tokens, limited=limited)
 
-    def texts(self, evidence_ids: list[str]) -> list[str]:
+    def texts(self, evidence_ids: Iterable[str]) -> list[str]:
         return [self.searchable[evidence_id] for evidence_id in evidence_ids]
 
     def home_record(self, evidence_id: str) -> str | None:
@@ -231,7 +318,9 @@ def _evidence_kind(evidence: EvidenceDoc, record: RecordBrief | None) -> Evidenc
 
     A bullet is always a statement. Evidence without a bullet is a statement
     when it belongs to no listed record (a skill list) or when its words come
-    from the record's summary paragraph; otherwise it is the header record.
+    from the record's summary paragraph; otherwise it is the header record or
+    the "Skills: ..." line of a role or project, which shows what the record
+    lists but is not something the applicant achieved.
     """
     if evidence.bullet_id is not None or record is None:
         return "statement"
@@ -242,13 +331,43 @@ def _evidence_kind(evidence: EvidenceDoc, record: RecordBrief | None) -> Evidenc
     return "record_details"
 
 
-def profile_skills(records: list[ProfileRecord]) -> list[str]:
-    """Every skill listed in the confirmed profile, once, in profile order."""
-    skills: dict[str, str] = {}
+def _plainly_listed(records: list[ProfileRecord]) -> Iterable[tuple[ProfileRecord, str]]:
+    """``(record, skill)`` for every skill the confirmed profile lists as an
+    ordinary skill. The skills of a group whose title is a qualifier
+    ("Coursework exposure only") are left out: taken out of that group they
+    would read as skills the applicant works with."""
     for record in records:
+        if record.category == "skill" and is_limited_exposure(record.title):
+            continue
         for skill in record.skills:
-            skills.setdefault(skill.lower(), skill)
+            yield record, skill
+
+
+def profile_skills(records: list[ProfileRecord]) -> list[str]:
+    """The skills offered to the model: every plainly listed skill of the
+    confirmed profile, once, in profile order."""
+    skills: dict[str, str] = {}
+    for _, skill in _plainly_listed(records):
+        skills.setdefault(skill.lower(), skill)
     return list(skills.values())
+
+
+def listed_skills(records: list[ProfileRecord]) -> dict[str, str]:
+    """``{skill name in comparison form: record_id}`` for every plainly listed
+    skill, under the first record that lists it.
+
+    The user confirmed these skills, so each may appear in a draft even when
+    no evidence text happens to repeat its name (a skill listed under a role
+    rather than in a skill group). "AWS (S3, EC2)" is also known as "AWS",
+    unless the note in brackets is a qualifier such as "(coursework)".
+    """
+    listed: dict[str, str] = {}
+    for record, skill in _plainly_listed(records):
+        names = [skill] if is_limited_exposure(skill) else [skill, skill.partition("(")[0]]
+        for name in names:
+            if fold_text(name):
+                listed.setdefault(fold_text(name), record.record_id)
+    return listed
 
 
 def build_model_context(
@@ -350,18 +469,131 @@ def check_statement(
     verdict = validate_claim(text, index.texts(usable), grounding, section=section, factual=factual)
     if foreign and verdict.status != "supported":
         verdict = ClaimVerdict(verdict.status, [OTHER_RECORD_MESSAGE, *verdict.warnings])
+    if section in FREE_STANDING_SECTIONS and verdict.status == "supported":
+        doubts = [
+            *_limited_exposure_doubts(text, usable, index, grounding),
+            *_borrowed_evidence_doubts(text, usable, index, grounding, section),
+        ]
+        if doubts:
+            verdict = ClaimVerdict("needs_review", doubts)
     return usable, verdict
 
 
+def _limited_exposure_message(name: str) -> str:
+    return f'Your profile mentions "{name}" only as coursework or limited exposure.'
+
+
+def _limited_exposure_doubts(
+    text: str, cited: list[str], index: EvidenceIndex, grounding: GroundingContext
+) -> list[str]:
+    """Warnings for names and job keywords that the confirmed profile mentions
+    only as coursework or passing exposure, in a statement that drops that
+    qualifier.
+
+    The cited evidence does contain the word, so the ordinary checks pass;
+    what is lost is "coursework only". "Experienced with TensorFlow" must not
+    be backed by "Coursework exposure only: TensorFlow".
+    """
+    cited_limited = [evidence_id for evidence_id in cited if evidence_id in index.limited]
+    if not cited_limited or is_limited_exposure(text):
+        return []
+    limited = Vocabulary.of(index.texts(cited_limited))
+    plain = Vocabulary.of(
+        text for evidence_id, text in index.searchable.items() if evidence_id not in index.limited
+    )
+    return [
+        _limited_exposure_message(term.raw)
+        for term in find_terms(text, grounding.requirement_keywords)
+        if limited.has(term) and not plain.has(term)
+    ]
+
+
+def _names_record(sentence: str, parent: EvidenceParent) -> bool:
+    """True when the sentence names the record: an employer by its
+    organisation, a project by its title (whole words, any letter case)."""
+    name = parent.organization if parent.category == EXPERIENCE_CATEGORY else parent.title
+    if not name or not name.strip():
+        return False
+    pattern = rf"(?<!\w){re.escape(fold_text(name))}(?!\w)"
+    return re.search(pattern, fold_text(sentence)) is not None
+
+
+def _borrowed_evidence_doubts(
+    text: str, cited: list[str], index: EvidenceIndex, grounding: GroundingContext, section: Section
+) -> list[str]:
+    """Warnings for sentences that name an employer but rest on what was done
+    in another role or in a project.
+
+    A summary line or cover-letter paragraph may cite several records, and the
+    ordinary checks accept a word or figure found in any of them. So "At
+    Brightloom Labs I built search over 12,000 trip reports" passes when it
+    cites one Brightloom bullet and the personal project the figure comes from.
+
+    Rule: a sentence that names an employer is checked again without the cited
+    evidence of every role and project it does not name. If it no longer
+    holds, a project or another job is being presented as work at that employer.
+    """
+    parents = {evidence_id: index.documents[evidence_id].parent for evidence_id in cited}
+    doubts: list[str] = []
+    for sentence in split_sentences(text):
+        named = {
+            evidence_id
+            for evidence_id, parent in parents.items()
+            if parent is not None and _names_record(sentence.text, parent)
+        }
+        employers = [
+            parents[evidence_id].organization
+            for evidence_id in cited
+            if evidence_id in named and parents[evidence_id].category == EXPERIENCE_CATEGORY
+        ]
+        own = [
+            evidence_id
+            for evidence_id, parent in parents.items()
+            if evidence_id in named
+            or parent is None
+            or parent.category not in (EXPERIENCE_CATEGORY, *PROJECT_CATEGORIES)
+        ]
+        if not employers or len(own) == len(parents):
+            continue
+        again = validate_claim(sentence.text, index.texts(own), grounding, section=section)
+        message = (
+            f"This sentence names {employers[0]} but relies on evidence from another "
+            "role or project."
+        )
+        if again.status != "supported" and message not in doubts:
+            doubts.append(message)
+    return doubts
+
+
 def check_skill(
-    name: str, preferred_ids: list[str], index: EvidenceIndex
+    name: str,
+    preferred_ids: list[str],
+    index: EvidenceIndex,
+    listed: Mapping[str, str] | None = None,
 ) -> tuple[list[str], ClaimVerdict]:
-    """A skill may be listed only if some evidence of the confirmed profile
-    mentions it. Returns the citations and the verdict; the server picks the
-    citations itself (records the model cited are tried first)."""
-    evidence_ids = evidence_mentioning(name, index.tokens, preferred_ids)
-    if evidence_ids:
-        return evidence_ids, ClaimVerdict("supported", [])
+    """Decide whether a skill may be listed. Returns the citations and the
+    verdict; the server picks the citations itself (evidence the model cited
+    is tried first).
+
+    - Evidence names the skill without a qualifier: supported.
+    - No evidence names it, but the confirmed profile lists it (``listed``,
+      see listed_skills): supported, citing the record that lists it. The user
+      confirmed the skill; it is simply written under a role or project.
+    - Evidence names it only as coursework or passing exposure: needs review,
+      unless the skill's own text keeps that qualifier.
+    - Otherwise it is not in the confirmed profile: unsupported.
+    """
+    mentioning = evidence_mentioning(name, index.tokens, preferred_ids, limit=len(index.tokens))
+    plain = [evidence_id for evidence_id in mentioning if evidence_id not in index.limited]
+    if plain or (mentioning and is_limited_exposure(name)):
+        return (plain or mentioning)[:MAX_SKILL_CITATIONS], ClaimVerdict("supported", [])
+    listing_record = (listed or {}).get(fold_text(name))
+    if listing_record is not None:
+        return index.built_from(listing_record, None)[:1], ClaimVerdict("supported", [])
+    if mentioning:
+        return mentioning[:MAX_SKILL_CITATIONS], ClaimVerdict(
+            "needs_review", [_limited_exposure_message(name)]
+        )
     message = f'"{name}" is not mentioned in your confirmed profile.'
     return [], ClaimVerdict("unsupported", [message])
 
@@ -434,6 +666,16 @@ class Draft:
             located for located in self.claims() if located.claim.validation_status == "unsupported"
         ]
         return len(unsupported) + len(self.misplaced)
+
+    def needs_correction_pass(self) -> bool:
+        """True when a second model call could repair something: an unsupported
+        sentence or bullet can be rewritten from the evidence. An unsupported
+        skill name cannot be reworded, only dropped, and dropping it needs no
+        model call, so skills alone never pay for a correction pass."""
+        return bool(self.misplaced) or any(
+            located.claim.validation_status == "unsupported" and located.section != "skills"
+            for located in self.claims()
+        )
 
 
 def _date_range(record: ProfileRecord) -> str | None:
@@ -530,11 +772,38 @@ def _compose_entries(
                 for bullet in entry.bullets
                 if bullet.text.strip()
             ]
+    for bullets in bullets_by_record.values():
+        flag_repeated_bullets(bullets)
     return bullets_by_record, misplaced
 
 
+def flag_repeated_bullets(bullets: list[Claim]) -> None:
+    """Mark a supported bullet for review when it repeats an earlier bullet of
+    the same entry.
+
+    A profile can state one fact twice (in a role's summary paragraph and
+    again as an outcome bullet), and the model then writes a bullet from each.
+    Two bullets repeat each other when at least DUPLICATE_BULLET_OVERLAP of
+    the shorter one's words occur in the other. The earlier bullet is left
+    alone and nothing is deleted: the user decides which wording to keep.
+    """
+    seen: list[frozenset[str]] = []
+    for bullet in bullets:
+        words = singular_tokens(bullet.text)
+        repeats = any(
+            words
+            and earlier
+            and len(words & earlier) / min(len(words), len(earlier)) >= DUPLICATE_BULLET_OVERLAP
+            for earlier in seen
+        )
+        if repeats and bullet.validation_status == "supported":
+            bullet.validation_status = "needs_review"
+            bullet.warnings = [DUPLICATE_BULLET_MESSAGE]
+        seen.append(words)
+
+
 def _compose_skills(
-    output: LLMGeneration, builder: ClaimBuilder, index: EvidenceIndex
+    output: LLMGeneration, builder: ClaimBuilder, index: EvidenceIndex, listed: Mapping[str, str]
 ) -> list[Claim]:
     """One claim per distinct skill name (case-insensitive)."""
     skills: dict[str, Claim] = {}
@@ -542,7 +811,7 @@ def _compose_skills(
         name = " ".join(skill.name.split())
         if not name or name.lower() in skills:
             continue
-        evidence_ids, verdict = check_skill(name, builder.resolve(skill.evidence), index)
+        evidence_ids, verdict = check_skill(name, builder.resolve(skill.evidence), index, listed)
         skills[name.lower()] = Claim(
             item_id=new_id(),
             text=name,
@@ -614,7 +883,7 @@ def compose_draft(
             for record in profile.records
             if record.category == "certification"
         ],
-        skills=_compose_skills(output, builder, index),
+        skills=_compose_skills(output, builder, index, listed_skills(profile.records)),
     )
     cover_letter = CoverLetter(
         paragraphs=[
@@ -677,3 +946,63 @@ def remove_unsupported(draft: Draft) -> list[OmittedClaim]:
     resume.skills = keep_supported("skills", resume.skills)
     draft.cover_letter.paragraphs = keep_supported("cover_letter", draft.cover_letter.paragraphs)
     return omitted
+
+
+def _own_statements(record: ProfileRecord) -> list[tuple[str, str | None]]:
+    """``(text, bullet_id)`` of what a confirmed record says was done: its
+    bullets, or its summary paragraph (bullet_id None) when it has no bullets.
+    Statements in the first person are left out; they are remarks ("I did not
+    write down the dates"), not achievements."""
+    statements: list[tuple[str, str | None]] = [
+        (bullet.text, bullet.bullet_id) for bullet in record.bullets
+    ]
+    if not statements and record.summary:
+        statements = [(record.summary, None)]
+    return [(text, bullet_id) for text, bullet_id in statements if not _FIRST_PERSON.search(text)]
+
+
+def fill_empty_entries(draft: Draft, profile: ProfileDoc, index: EvidenceIndex) -> list[str]:
+    """Make sure no entry of the resume is printed as a bare heading. Call it
+    after ``remove_unsupported``. Returns the evidence IDs the added bullets cite.
+
+    Why this is needed: a bullet may only cite evidence of its own role, and
+    retrieval selects evidence by relevance to the job. A confirmed role whose
+    statements were not retrieved, or whose bullets were all removed, would
+    otherwise appear with a heading and nothing under it.
+
+    - A role without bullets gets up to FALLBACK_BULLETS_PER_ROLE of its own
+      confirmed statements, word for word, each citing the evidence built from
+      it. They are "supported" without a check because the text is the
+      confirmed evidence itself. A role whose record has no usable statement
+      keeps its heading: the employment history is confirmed either way.
+    - A project, publication or achievement without bullets is dropped; it is
+      optional. It stays only when its confirmed record has no statements at
+      all, because then the title is all there is to show.
+    """
+    records = {record.record_id: record for record in profile.records}
+    cited: list[str] = []
+    for entry in draft.resume.experience:
+        if entry.bullets:
+            continue
+        for text, bullet_id in _own_statements(records[entry.record_id]):
+            evidence_ids = index.built_from(entry.record_id, bullet_id)
+            if not evidence_ids:
+                continue
+            entry.bullets.append(
+                Claim(
+                    item_id=new_id(),
+                    text=text,
+                    evidence_ids=evidence_ids,
+                    validation_status="supported",
+                )
+            )
+            cited += evidence_ids
+            if len(entry.bullets) == FALLBACK_BULLETS_PER_ROLE:
+                break
+    draft.resume.projects = [
+        entry
+        for entry in draft.resume.projects
+        if entry.bullets
+        or not (records[entry.record_id].bullets or records[entry.record_id].summary)
+    ]
+    return cited

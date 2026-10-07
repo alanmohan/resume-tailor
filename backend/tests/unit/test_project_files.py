@@ -58,8 +58,9 @@ def test_env_example_loads_and_matches_the_built_in_defaults() -> None:
         for name in Settings.model_fields
         if getattr(from_template, name) != getattr(defaults, name)
     }
-    # Only the API key placeholder differs from the code defaults.
-    assert differing == {"openai_api_key"}
+    # Nothing differs: the API key placeholder counts as "no key" (SPEC-06).
+    assert differing == set()
+    assert from_template.provider_configured is False
 
 
 def test_env_example_contains_no_real_credentials() -> None:

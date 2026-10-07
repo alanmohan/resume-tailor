@@ -1,0 +1,48 @@
+Experience
+
+Research Software Engineer - Pellwater Hydrology Lab (Sep 2022 - Present)
+Role: Technical lead for the forecasting tools group
+
+I joined Pellwater Hydrology Lab to rebuild the river-level forecasting service that 14 regional water offices rely on. The old system was a set of spreadsheets and cron scripts, and my first year went into replacing it with a tested Python service and a nightly retraining job.
+
+In my second year I moved from building the service to making it trustworthy. I wrote the evaluation suite that replays 6 years of gauge readings against every model change, and I now review each release with the two hydrologists who sign off on it.
+
+Key technologies: Python, PyTorch, FastAPI, PostgreSQL, Docker
+
+Outcomes and metrics:
+- Reduced the mean absolute error of the 48-hour river-level forecast from 31 cm to 19 cm
+- Cut the nightly retraining run from 5 hours to 70 minutes by caching feature windows
+- Moved 14 regional water offices onto the new forecasting API
+
+Data Analyst - Corrin Vale Transit Authority (Jun 2020 - Aug 2022)
+
+I started as the only analyst on the ridership team. Most of my work was turning fare-gate exports into weekly reports that planners could read without asking me what a column meant.
+
+Key technologies: SQL, pandas, Tableau
+
+- Built a ridership dashboard used by 22 planners
+- Automated 9 weekly reports that had been assembled by hand
+
+Publications
+
+Gauge-Aware Sequence Models for Short-Horizon River Forecasting - Northern Hydroinformatics Workshop (2024)
+Status: Accepted, presented as a contributed talk
+Role: First author
+
+We show that conditioning a sequence model on gauge metadata improves short-horizon forecasts on small catchments.
+
+Outcomes and metrics:
+- Lowered forecast error by 0.12 normalised RMSE on 37 held-out catchments
+- Released a benchmark of 410,000 hourly gauge readings
+- Matched the accuracy of the operational baseline with one third of the training data
+
+Projects
+
+Floodline Notebook - Personal project (Mar 2023 - Jun 2023)
+Role: Sole developer
+- Built a small web app that plots 3 years of rainfall for any postcode
+- Wrote the tile cache that keeps map loads under 400 ms
+
+Skills
+
+Languages: Python, SQL, R

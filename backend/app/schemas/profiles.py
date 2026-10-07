@@ -9,7 +9,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.common import IsoDateTime, Provenance, optional_text, required_text
+from app.schemas.common import (
+    IsoDateTime,
+    Provenance,
+    optional_text,
+    require_valid_unicode,
+    required_text,
+)
 
 SourceType = Literal["resume", "linkedin", "notes"]
 RecordCategory = Literal[
@@ -121,6 +127,16 @@ class IndexProgress(BaseModel):
     embedded: int = 0
 
 
+class ProfileNotice(BaseModel):
+    """A remark about the profile as a whole, not about one record: source
+    text that was not captured, or a missing name, contact detail or education
+    entry. It informs the user and never blocks confirmation. ``code`` is
+    stable for clients; ``message`` is plain text."""
+
+    code: str
+    message: str
+
+
 class Profile(BaseModel):
     profile_id: str
     version: int
@@ -132,6 +148,8 @@ class Profile(BaseModel):
     contact: Contact
     records: list[ProfileRecord]
     conflicts: list[Conflict]
+    # Empty when there is nothing to remark; older clients can ignore the field.
+    notices: list[ProfileNotice] = Field(default_factory=list)
     sources: list[ProfileSourceSummary]
     review_summary: ReviewSummary
     created_at: IsoDateTime
@@ -153,7 +171,7 @@ class SourceInput(BaseModel):
     def _text_not_blank(cls, text: str) -> str:
         if not text.strip():
             raise ValueError("Source text must not be empty")
-        return text
+        return require_valid_unicode(text)
 
 
 class IngestRequest(BaseModel):

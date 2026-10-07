@@ -189,7 +189,7 @@ Code: `backend/app/providers/fake/`.
 |---|---|
 | Extraction | Reads common resume layouts line by line: section headings, `Title - Organisation (dates)` header lines, bullet lines, comma-separated skills |
 | Job analysis | Reads headings and bullets of the posting |
-| Generation | Reuses evidence text, at most shortened to whole sentences, and cites it |
+| Generation | Reuses evidence text, at most shortened to whole sentences, and cites it. A statement written in the first person ("I did not write down the dates") is a remark and is never used as a bullet. Coverage rationales name whole keywords ("mentions github actions but not ci/cd") |
 | Embeddings | Hashed bag-of-words vectors, 256 dimensions, model name `fake-embedding-256` |
 
 It exists for tests, the Playwright suite and demo mode. It keeps call counters (used to prove that a repeated `Idempotency-Key` makes no second call) and can be told to fail or to wait (used for the timeout, rate-limit and clear-data-in-flight tests).
@@ -229,7 +229,7 @@ Three flows, each ingest, review, confirm, job analysis and generation:
 
 Model output varies from run to run, so the tests assert properties, never exact wording. A report with the generated documents, latency and token counts per call is printed after the test results.
 
-**Whether this test has been run, and with what result, is not recorded in this document.** It was being written while this document was prepared and was not run for it. See [section 13](#13-not-verified).
+**Last result (2026-10-07, 19:45 ET, prompt version `2026-10-07.9`): 18 of 18 passed in 110 s**, with 9 model calls and 5 embedding requests. It was the fourth full run of the day; the third (19:31 ET, prompt version `.8`) also passed 18 of 18 and needed one correction pass. Per-call latency, token counts, the coverage each flow reached and the weaknesses seen in the output are in `backend/tests/smoke/README.md`.
 
 ## 8. Playwright end-to-end suite
 
@@ -284,6 +284,7 @@ Described in full in `backend/fixtures/README.md`.
 |---|---|
 | `backend/fixtures/profiles/sample_*.txt`, `sample_expected.json` | A fictional candidate (resume, LinkedIn, notes) with deliberate traps: Docker but no Kubernetes; exactly one percentage (20% test coverage); one cross-source date conflict; one undated role; one duplicated bullet |
 | `backend/fixtures/profiles/injection_resume.txt`, `injection_expected.json` | A second fictional candidate whose resume contains a planted instruction line and a canary string |
+| `backend/fixtures/profiles/prose_profile.txt`, `prose_expected.json` | A third fictional profile shaped like the structures that broke on the real master file: a role with a two-paragraph first-person summary and `Key technologies:` lines, a publication with a result list plus `Status:` and `Role:` lines, and no contact block or education |
 | `backend/fixtures/jobs/synthetic/*.json` | Six invented postings with known expected outcomes: `close_fit`, `partial_fit`, `stretch_kubernetes`, `metric_trap`, `injection_job`, `no_match` |
 | `backend/fixtures/jobs/live/*.json` | Provenance and short excerpts of four real public postings retrieved on 2026-10-07 (close, partial, partial, stretch) |
 | `backend/fixtures/jobs/live/_local_full/` | Full text of those postings. Git-ignored; local testing only; never commit or redistribute |
@@ -303,7 +304,7 @@ Run `build_frontend_sample.py` and then `check_fixtures.py` after changing a sam
 
 The specification asks for a configurable `EXPERIENCE_MASTER_PATH`, a seed/test command that runs the real experience master file against retrieved job descriptions, and a short report of actual results.
 
-**The command exists: `backend/scripts/evaluate_experience_master.py`.** It appeared while this document was being written and was still being changed, so read its module docstring for the current details. **No result of a real run is recorded in this document**; see the status at the end of this section.
+**The command is `backend/scripts/evaluate_experience_master.py`**, documented in `backend/scripts/README.md`. It was run twice with the real provider on 2026-10-07, before and after the review fixes; the results are in [EXPERIENCE_MASTER_REPORT.md](EXPERIENCE_MASTER_REPORT.md) and summarised at the end of this section.
 
 Run it from `backend/`. It calls the real AI provider and is billed:
 
@@ -334,11 +335,25 @@ Budget stated in the script: one extraction, one confirmation, at most three job
 
 Exit status: 0 no failures, 1 failures were found, 2 nothing was run (for example the master file or the API key is missing), 3 the report was withheld by the privacy check.
 
-**Status when this document was written**
+**Results (2026-10-07)**
 
-- Self-test mode was run for this document at 18:33 ET: `MASTER_EVAL_SELFTEST=1 .venv/bin/python -m scripts.evaluate_experience_master` exited 0, reported 0 failures, deleted its session data and left no report file. That shows the script runs; it says nothing about the real profile.
-- A real run (the actual master file, the real provider, the live postings) was **not** made for this document, and no report file existed in `backend/scripts/out/` at that time. If one has been made since, its report is the record; this document does not contain or summarise it.
-- The script's docstring refers to `scripts/README.md`, which did not exist yet.
+Two real runs were made with the command above, each with the master file, the real provider and three live postings (Cresta, close fit; Stripe, partial fit; Motional, stretch). Both exited 0 with 0 failures. The privacy-safe comparison is [EXPERIENCE_MASTER_REPORT.md](EXPERIENCE_MASTER_REPORT.md); the script's own detailed report stays in the git-ignored `backend/scripts/out/`.
+
+| | Run 1 (18:39 ET, before the review fixes) | Run 2 (19:34 ET, after them) |
+|---|---|---|
+| Model calls / embedding requests | 10 / 4 | 7 / 4 |
+| Wall time | 163.4 s | 105.5 s |
+| Records, statements | 7, 19 | 8, 28 |
+| Source spans equal to the original text | 26 of 26 | 36 of 36 |
+| Fact preservation, numeric grounding, citations, coverage arithmetic | pass for all three postings | pass for all three postings |
+| Generations that needed a correction pass | 3 of 3 | 0 of 3 |
+| Omitted claims | 0 / 1 / 2 | 0 / 0 / 0 |
+| Evidence coverage, close / partial / stretch | 31.2% / 50.0% / 37.5% | 50.0% / 55.6% / 14.3% |
+| Cover letter words | 108 / 124 / 102 | 220 / 204 / 179 |
+
+Run 2 exposed a new extraction problem (technology sections under a role were returned as whole lines in one skill group). It was fixed in the prompt and on the server and checked with four single model calls rather than a third full run: one extraction, then one extraction, job analysis and generation for the stretch posting. Both extractions returned 107 individual skills under their records, and the generation listed 10 skills, all supported, without a correction pass. The close and partial postings were **not** run again after that fix.
+
+Self-test mode (`MASTER_EVAL_SELFTEST=1`, fake provider, fictional fixtures) was run again at 19:30 and 19:52 ET after the fixes: exit status 0, 0 failures both times.
 
 ## 11. Results observed while writing this document
 
@@ -363,6 +378,24 @@ Machine: macOS, Python 3.12.2, Node 23.10.0, npm 10.9.2, MongoDB 8.0.32 in Docke
 | `npm run build` | not run for this document | |
 | `npm run test:e2e` | not run for this document | |
 | `uvicorn ...` and `npm run dev` | not started for this document | |
+
+### After the review fixes (backend integration pass, 19:25 to 19:55 ET)
+
+The review findings were fixed in the evening and the backend was then checked as a whole. These are the last results of that pass; the table above is the earlier state. Frontend commands were not run in this pass.
+
+| Command | Observed | Time (ET) |
+|---|---|---|
+| `python -m pytest tests/unit -q` | **788 passed** in 1.6 s | 19:51 |
+| `python -m pytest tests/integration -q` | **362 passed** in 34 s | 19:51 |
+| `ruff check .` and `ruff format --check .` (from `backend/`) | All checks passed; 161 files already formatted | 19:51 |
+| `python backend/fixtures/check_fixtures.py` | 0 problems found | 19:51 |
+| `python -m pytest tests/smoke -m smoke` (without the opt-in variable) | 18 skipped | 19:52 |
+| `RUN_REAL_PROVIDER_SMOKE=1 python -m pytest tests/smoke -m smoke` | 18 passed in 117 s (prompt version `.8`, 10 model calls), then, after the extraction prompt changed, **18 passed in 110 s** (prompt version `.9`, 9 model calls) | 19:31, 19:45 |
+| `EXPERIENCE_MASTER_PATH="../Experience Master.docx" .venv/bin/python -m scripts.evaluate_experience_master` | exit status 0, 0 failures, 7 model calls and 4 embedding requests in 105.5 s; see section 10 | 19:34 |
+| `MASTER_EVAL_SELFTEST=1 .venv/bin/python -m scripts.evaluate_experience_master` | exit status 0, 0 failures | 19:30, 19:52 |
+| API started with `APP_ENV=test AI_PROVIDER=fake MONGODB_URI=mongodb://127.0.0.1:27017 MONGODB_DATABASE=resume_tailor_test_integrator uvicorn app.main:app --port 8041` and driven over HTTP with the sample profile and the `close_fit`, `stretch_kubernetes`, `partial_fit`, `metric_trap` and `no_match` jobs | `/readyz` 200 with `limits`; one conflict, shown once; every role with at least one bullet; coverage 80.0% for the close fit against 23.3% for the Kubernetes stretch; no draft mentions Kubernetes; a repeated `DELETE /api/session` answered 200 with zero counts. One defect found and fixed: demo mode printed a first-person remark from the notes as a resume bullet. The server was stopped and the database dropped. | 19:27 to 19:30 |
+
+Not done in this pass: the changes made after the HTTP walk-through (the skill-line split, the coverage aliases and the extraction prompt) were checked by the unit, integration and smoke tests and by the self-test, not by starting the server again.
 
 ## 12. Specification test matrix
 
@@ -395,13 +428,13 @@ Limits of what these tests show, from `backend/tests/TEST_MATRIX.md` and from re
 
 | Item | Status |
 |---|---|
-| Real OpenAI path (extraction, job analysis, generation, regeneration, verification, embeddings) | Not run for this document. The backend integration pass reported that it had never been called; the smoke test in section 7 is how to check it. Prompt quality, the `MAX_OUTPUT_TOKENS_*` values and latency against `gpt-6-luna` are therefore unverified here. |
+| Real OpenAI path (extraction, job analysis, generation, regeneration, embeddings) | Run locally with `gpt-6-luna`: the smoke test passed 18 of 18 (section 7) and the experience master evaluation completed (section 10). Not run on the deployed service. The semantic verifier was called once earlier in the day and is off by default; `gpt-5.6-terra` was tried with one extraction call only. |
 | `npm run test -- --run` | A clean run was not observed, see section 11. Re-run it on a machine that is not busy. |
 | `python -m pytest tests/integration -q` | Clean in the first and third run; 9 failures in the second, made while source files were being edited, see section 11. The cause of those failures was not established. |
 | `npm run build`, `npm run test:e2e` | Not run for this document. |
 | Starting the API and the frontend by the commands in section 3 | Not started for this document. The backend integration pass reported a successful start on ports 8000 and 8010 with the fake provider and correct `/healthz`, `/readyz` and `/docs` responses. |
 | Setup from a clean checkout | Partly. The backend installation into a new virtual environment and the unit tests from it were run (section 11). `npm ci` and a fresh clone of the repository were not. |
-| Experience master file against the retrieved job postings | No real run is recorded here, see section 10. |
-| The four live postings | Not run through the application for this document. They are a snapshot of 2026-10-07 and will close or change. |
+| Experience master file against the retrieved job postings | Run twice on 2026-10-07, see section 10 and [EXPERIENCE_MASTER_REPORT.md](EXPERIENCE_MASTER_REPORT.md). The close and partial postings were not run again after the last two fixes. |
+| The four live postings | Three were run through the application with the real provider (section 10). The Glean posting was not. They are a snapshot of 2026-10-07 and will close or change. |
 | `build_frontend_sample.py`, `fetch_live_jobs.py` | Not run for this document. |
 | Behaviour on the deployed service | See [DEPLOYMENT.md](DEPLOYMENT.md). |

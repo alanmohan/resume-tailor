@@ -248,6 +248,15 @@ def fold_text(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
+# Wording that marks a skill as known from study or in passing only: a skill
+# group titled "Coursework exposure only", a note such as "(basic familiarity)".
+LIMITED_EXPOSURE = re.compile(
+    r"\b(?:course\s?work|exposure|familiar(?:ity)?|beginner|novice|introductory"
+    r"|(?:basic|limited|some)\s+(?:knowledge|understanding|experience))\b",
+    re.IGNORECASE,
+)
+
+
 # ---- Instruction-like text in untrusted data ---------------------------------------
 
 # Common prompt-injection phrasing: a chat-role prefix at the start of a line,
@@ -296,6 +305,7 @@ class TextSpan:
 
 
 _PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n\s*")
+_LINE_BREAK = re.compile(r"\s*\n\s*")
 # A line break, or whitespace after ., ! or ? when the next character does not
 # start with a lower-case letter (so "approx. five" is not split).
 _SENTENCE_BREAK = re.compile(r"\s*\n\s*|(?<=[.!?])\s+(?=[^\sa-z])")
@@ -327,6 +337,11 @@ def split_sentences(text: str) -> list[TextSpan]:
     return _split_on(text, 0, len(text), _SENTENCE_BREAK)
 
 
+def split_lines(text: str, start: int = 0, end: int | None = None) -> list[TextSpan]:
+    """The non-empty lines of ``text[start:end]``, trimmed; offsets refer to ``text``."""
+    return _split_on(text, start, len(text) if end is None else end, _LINE_BREAK)
+
+
 def _split_by_words(source: str, span: TextSpan, max_words: int) -> list[TextSpan]:
     """Last resort for a single sentence longer than ``max_words``: cut it
     after every ``max_words`` words."""
@@ -340,7 +355,9 @@ def _split_by_words(source: str, span: TextSpan, max_words: int) -> list[TextSpa
     return pieces
 
 
-def chunk_text(text: str, min_words: int = 100, max_words: int = 250) -> list[TextSpan]:
+def chunk_text(
+    text: str, min_words: int = 100, max_words: int = 250, *, split_at_lines: bool = False
+) -> list[TextSpan]:
     """Split text into chunks of roughly ``min_words``-``max_words`` words.
 
     Text of at most ``max_words`` words is returned as one chunk. Longer text
@@ -350,6 +367,10 @@ def chunk_text(text: str, min_words: int = 100, max_words: int = 250) -> list[Te
     a contiguous slice of ``text`` (``chunk.text == text[chunk.start:chunk.end]``)
     so the caller can turn it into exact source offsets. Chunks do not overlap;
     the evidence builder adds the role/project context to each one instead.
+
+    A paragraph break is a blank line. With ``split_at_lines`` a single line
+    break counts as one too: prose pasted from a word processor has one line
+    per paragraph and no blank lines in between.
     """
     whole = text.strip()
     if not whole:
@@ -370,7 +391,7 @@ def chunk_text(text: str, min_words: int = 100, max_words: int = 250) -> list[Te
         chunk_start = None
         chunk_words = 0
 
-    for paragraph in split_paragraphs(text):
+    for paragraph in split_lines(text) if split_at_lines else split_paragraphs(text):
         for sentence in _split_on(text, paragraph.start, paragraph.end, _SENTENCE_BREAK):
             words = count_words(sentence.text)
             if words > max_words:

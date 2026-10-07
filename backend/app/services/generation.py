@@ -13,10 +13,12 @@ How one draft is produced (GenerationService.create):
    statement (app/services/validation.py) and composes all mandatory metadata
    (contact details, role and degree headers, dates, education, certifications)
    verbatim from the confirmed profile. The model cannot supply any of it.
-6. If statements are unsupported, the model gets one correction pass with the
-   concrete findings. Statements that are still unsupported afterwards are
-   removed and listed under ``omitted_claims``; statements that need review
-   stay, flagged.
+6. If sentences or bullets are unsupported, the model gets one correction pass
+   with the concrete findings (an unsupported skill name alone is simply
+   dropped). Statements that are still unsupported afterwards are removed and
+   listed under ``omitted_claims``; statements that need review stay, flagged.
+   A confirmed role left without bullets then gets its own confirmed bullets,
+   so no role is printed as a bare heading.
 7. Coverage ratings are checked against the evidence (app/services/coverage.py).
 
 Steps 4 to 6 are pure functions in app/services/drafting.py. This module holds
@@ -75,6 +77,7 @@ from app.services.coverage import (
 )
 from app.services.drafting import (
     REGENERABLE_SECTIONS,
+    UNCITED_EDIT_MESSAGE,
     Draft,
     EvidenceIndex,
     ModelContext,
@@ -86,6 +89,9 @@ from app.services.drafting import (
     check_statement,
     collect_feedback,
     compose_draft,
+    fill_empty_entries,
+    is_courtesy,
+    listed_skills,
     model_text,
     profile_skills,
     remove_unsupported,
@@ -405,7 +411,7 @@ class GenerationService:
         draft = compose_draft(output, profile, context, index, grounding)
 
         corrected = False
-        if draft.unsupported_count():
+        if draft.needs_correction_pass():
             second, call_usage = await self._correction_pass(
                 draft, profile, context, index, grounding
             )
@@ -417,8 +423,22 @@ class GenerationService:
 
         usage += await self._apply_verifier(draft.claims(), index, warnings)
         omitted = remove_unsupported(draft)
+        # Evidence the model was not shown but the draft now cites: stored with
+        # the retrieved evidence so these bullets can be regenerated later.
+        retrieved_ids = list(
+            dict.fromkeys(
+                [doc.evidence_id for doc in retrieval.evidence]
+                + fill_empty_entries(draft, profile, index)
+            )
+        )
         warnings += _removal_warnings(draft, omitted)
-        coverage = build_coverage(job.requirements, draft.coverage, index.searchable)
+        coverage = build_coverage(
+            job.requirements,
+            draft.coverage,
+            index.searchable,
+            job_title=job.title,
+            company=job.company,
+        )
 
         now = utc_now()
         log_event(
@@ -440,7 +460,7 @@ class GenerationService:
             update={
                 "status": "completed",
                 "error": None,
-                "retrieved_evidence_ids": [doc.evidence_id for doc in retrieval.evidence],
+                "retrieved_evidence_ids": retrieved_ids,
                 "resume": draft.resume,
                 "cover_letter": draft.cover_letter,
                 "coverage": coverage,
@@ -590,6 +610,13 @@ class GenerationService:
         index = await self._version_index(owner_id, generation)
         job = await self._repos.jobs.get(owner_id, generation.job_id)
         grounding = self._stored_grounding(generation, job, index)
+        # The skills listed in the profile count only while the profile is
+        # still the version this draft was generated from.
+        profile = await self._repos.profiles.get_for_owner(owner_id)
+        unchanged = profile is not None and "profile_changed" not in stale_reasons(
+            generation, profile, job
+        )
+        listed = listed_skills(profile.records) if unchanged else {}
 
         edited = [
             located
@@ -597,7 +624,7 @@ class GenerationService:
             if located.claim.user_edited
         ]
         for located in edited:
-            _revalidate(located, index, grounding)
+            _revalidate(located, index, grounding, listed)
         usage = await self._apply_verifier(edited, index, generation.warnings)
         generation.usage = _usage_summary(usage, generation.usage)
         saved = await self._save(session, generation, validated=True)
@@ -782,16 +809,24 @@ def _find_claim(generation: GenerationDoc, item_id: str) -> LocatedClaim:
     raise NotFound("Item not found in this generation.")
 
 
-def _revalidate(located: LocatedClaim, index: EvidenceIndex, grounding: GroundingContext) -> None:
+def _revalidate(
+    located: LocatedClaim,
+    index: EvidenceIndex,
+    grounding: GroundingContext,
+    listed: dict[str, str],
+) -> None:
     """Give a user-edited statement a fresh verdict without touching its text.
 
-    A skill is checked for a mention in the profile. Any other statement is
-    checked against the evidence it cites; a cover-letter paragraph without
-    citations is treated as connective text, since the user wrote it as such.
+    A skill is checked for a mention in the profile (``listed`` holds the
+    skills the profile lists, see listed_skills). Any other statement is
+    checked against the evidence it cites. A cover-letter paragraph without
+    citations has nothing to be checked against: it passes as connective text
+    only when it is a plain greeting or closing (is_courtesy); anything else
+    the user wrote there may state a qualification, so it needs review.
     """
     claim = located.claim
     if located.section == "skills":
-        claim.evidence_ids, verdict = check_skill(claim.text, claim.evidence_ids, index)
+        claim.evidence_ids, verdict = check_skill(claim.text, claim.evidence_ids, index, listed)
     else:
         claim.evidence_ids, verdict = check_statement(
             claim.text,
@@ -802,4 +837,6 @@ def _revalidate(located: LocatedClaim, index: EvidenceIndex, grounding: Groundin
             record_id=located.record_id,
             factual=bool(claim.evidence_ids),
         )
+        if verdict.status == "not_applicable" and not is_courtesy(claim.text):
+            verdict = ClaimVerdict("needs_review", [UNCITED_EDIT_MESSAGE])
     claim.validation_status, claim.warnings = verdict.status, verdict.warnings

@@ -8,7 +8,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.common import IsoDateTime, optional_text, required_text
+from app.schemas.common import (
+    IsoDateTime,
+    optional_text,
+    require_valid_unicode,
+    required_text,
+)
 
 RequirementCategory = Literal[
     "skill", "experience", "education", "certification", "responsibility", "other"
@@ -80,7 +85,7 @@ class JobCreateRequest(BaseModel):
     def _description_not_blank(cls, description: str) -> str:
         if not description.strip():
             raise ValueError("Job description must not be empty")
-        return description
+        return require_valid_unicode(description)
 
 
 class RequirementInput(BaseModel):

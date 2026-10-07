@@ -13,6 +13,13 @@ stored, because model output is not trusted:
 - The same role found in two sources is merged into one record only when title
   and organisation match. Different dates are shown as a Conflict, never
   resolved here. Distinct roles are never merged.
+- A name, e-mail address or phone number that differs between sources is a
+  Conflict as well; the first source's value is shown until the user decides.
+- A disagreement is listed once, whether the model reported it, the server
+  found it, or both.
+- Source lines that ended up in no part of the draft, and a missing name,
+  contact detail or education entry, are reported as profile-level notices.
+  Notices inform the user and never block confirmation.
 """
 
 import logging
@@ -46,6 +53,7 @@ from app.schemas.profiles import (
     IngestRequest,
     Profile,
     ProfileBullet,
+    ProfileNotice,
     ProfileRecord,
     SourceInput,
     SourceRef,
@@ -53,6 +61,7 @@ from app.schemas.profiles import (
 from app.security import SessionContext
 from app.services.sessions import SessionService
 from app.services.textutil import (
+    LIMITED_EXPOSURE,
     NormalizedText,
     content_hash,
     fold_text,
@@ -60,6 +69,7 @@ from app.services.textutil import (
     looks_like_instruction,
     normalize_whitespace,
     surrounding_lines,
+    tokenize,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,12 +104,43 @@ INSTRUCTION_LEFT_OUT = (
     "was left out."
 )
 
+# Codes of the profile-level notices (part of the API, see ProfileNotice).
+NOTICE_UNCAPTURED = "source_text_not_captured"
+NOTICE_NO_NAME = "missing_name"
+NOTICE_NO_CONTACT = "missing_contact_details"
+NOTICE_NO_EDUCATION = "missing_education"
+# A line with fewer content words is a heading or a label, not worth a notice.
+MIN_NOTICE_WORDS = 3
+# A line counts as captured when at least this share of its characters is quoted.
+MIN_QUOTED_SHARE = 0.5
+MAX_NOTICE_EXCERPTS = 3
+MAX_NOTICE_EXCERPT_CHARS = 120
+
 # Categories for which missing dates are worth a second look by the user.
 DATED_CATEGORIES = frozenset({"employment", "education"})
 DATE_FIELDS = {"start_date": "start dates", "end_date": "end dates"}
+# Contact details on which two sources can disagree, with the wording used for
+# the conflict. A location is written too freely to compare ("Columbus, OH").
+CONTACT_CONFLICT_FIELDS = {
+    "name": "names",
+    "email": "e-mail addresses",
+    "phone": "phone numbers",
+}
+# Conflict fields the server checks itself. The model's own field label is free
+# text ("dates", "other"), so these findings are compared with it by value.
+SERVER_CHECKED_FIELDS = frozenset(
+    [*DATE_FIELDS, *(f"contact_{name}" for name in CONTACT_CONFLICT_FIELDS)]
+)
 _OPEN_ENDED = frozenset({"present", "current", "now", "ongoing"})
 # A list marker at the start of a quoted statement: "- ", "* ", "\u2022 ".
 _LIST_MARKER = re.compile(r"^[-*\u2022\u2023\u25e6\u00b7\u2013\u2014]\s+")
+# A whole line of a skills section given as ONE skill: a category label, a
+# colon and the list ("Backend & Cloud: Python, Flask, AWS S3.").
+_LABELLED_SKILL_LINE = re.compile(r"^(?P<label>(?:[^:,;()]|\([^()]*\)){2,60}):\s+(?P<items>\S.*)$")
+# The commas and semicolons between the items of such a list; one inside
+# brackets belongs to its item ("AWS (S3, EC2)").
+_SKILL_SEPARATOR = re.compile(r"[,;]\s*(?![^()]*\))")
+_LEADING_CONJUNCTION = re.compile(r"^(?:and|or)\s+", re.IGNORECASE)
 
 
 # ---- Small text helpers ------------------------------------------------------------
@@ -225,21 +266,44 @@ def _read_bullet(
     )
 
 
+def skill_items(skill: str) -> list[str]:
+    """The skills named by one entry of the model's skill list: normally the
+    entry itself.
+
+    Models sometimes return a whole line of a skills section as one skill
+    ("Backend & Cloud: Python, Flask, AWS S3."). Such a line is no skill name:
+    printed on a resume it reads as a sentence, and "Flask" could not be found
+    as a skill of its own. It is split into the items it lists; the category
+    label is a heading and is dropped. Two cases stay whole: a label that
+    qualifies the skills ("Coursework only: TensorFlow, Keras"), because the
+    qualifier must not be lost, and a line with a single item, which cannot be
+    told apart from a skill whose name has a colon in it."""
+    line = _LABELLED_SKILL_LINE.match(skill)
+    if line is None or LIMITED_EXPOSURE.search(line["label"]):
+        return [skill]
+    items = [
+        _LEADING_CONJUNCTION.sub("", piece.strip()).strip(" .")
+        for piece in _SKILL_SEPARATOR.split(line["items"])
+    ]
+    items = [item for item in items if item]
+    return items if len(items) > 1 else [skill]
+
+
 def _read_skills(skills: list[str], sources: list[PreparedSource], reasons: list[str]) -> list[str]:
     """Keep only skills that are written in a source. A skill that is nowhere
     in the supplied text was invented by the model, so it is left out and the
-    record is flagged."""
+    record is flagged. A labelled line given as one skill is read as the
+    skills it lists (see skill_items)."""
     kept = []
     for raw in skills:
-        skill = _clean(raw)
-        if skill is None:
-            continue
-        if len(skill) > MAX_SKILL_CHARS:
-            reasons.append(f"A skill longer than {MAX_SKILL_CHARS} characters was left out.")
-        elif not any(source.mentions(skill) for source in sources):
-            reasons.append(f'The skill "{skill}" was left out: it is not in the source text.')
-        else:
-            kept.append(skill)
+        entry = _clean(raw)
+        for skill in skill_items(entry) if entry else []:
+            if len(skill) > MAX_SKILL_CHARS:
+                reasons.append(f"A skill longer than {MAX_SKILL_CHARS} characters was left out.")
+            elif not any(source.mentions(skill) for source in sources):
+                reasons.append(f'The skill "{skill}" was left out: it is not in the source text.')
+            else:
+                kept.append(skill)
     return kept
 
 
@@ -318,23 +382,94 @@ def _read_record(
     return _Entry(record=record, aliases={llm_record.source}, summary_ref=summary_ref)
 
 
-def _read_contact(items: list[LLMContactItem], by_alias: dict[str, PreparedSource]) -> Contact:
-    """The first verifiable value per contact field, in the order sources were
-    submitted. A value that is not written in its source is left out, so the
-    user fills it in instead of confirming something the model made up."""
-    fields: dict[str, str] = {}
-    links: list[str] = []
+@dataclass(frozen=True)
+class _ContactFact:
+    """A contact detail that is written in the source it was read from."""
+
+    field: str
+    value: str
+    alias: str
+    ref: SourceRef
+
+
+def _verified_contact(
+    items: list[LLMContactItem], by_alias: dict[str, PreparedSource]
+) -> list[_ContactFact]:
+    """The contact details that occur in their source, in the order sources
+    were submitted. A value that is not written there is left out, so the user
+    fills it in instead of confirming something the model made up."""
+    facts = []
     for item in items:
         value = _clean(item.value)
         source = by_alias.get(item.source)
         limit = MAX_LINK_CHARS if item.field == "link" else MAX_LINE_CHARS
-        if value is None or len(value) > limit or source is None or source.locate(value) is None:
+        if value is None or len(value) > limit or source is None:
             continue
-        if item.field == "link":
-            links.append(value)
+        ref = source.locate(value)
+        if ref is not None:
+            facts.append(_ContactFact(item.field, value, item.source, ref))
+    return facts
+
+
+def _read_contact(facts: list[_ContactFact]) -> Contact:
+    """The first value of each contact field, and every distinct link. A later
+    source that states a different value is reported by _contact_conflicts."""
+    fields: dict[str, str] = {}
+    links: list[str] = []
+    for fact in facts:
+        if fact.field == "link":
+            links.append(fact.value)
         else:
-            fields.setdefault(item.field, value)
+            fields.setdefault(fact.field, fact.value)
     return Contact(**fields, links=unique_texts(links)[:MAX_LINKS])
+
+
+def _same_contact_value(field: str, first: str, second: str) -> bool:
+    """Whether two sources mean the same contact detail although they write it
+    differently: a phone number with or without country code and punctuation,
+    a name with or without a middle name or initial, an e-mail address in
+    another letter case."""
+    if field == "phone":
+        a, b = (re.sub(r"\D", "", value) for value in (first, second))
+        return a.endswith(b) or b.endswith(a)
+    if field == "name":
+        a, b = (set(re.findall(r"\w+", value.casefold())) for value in (first, second))
+        return a <= b or b <= a
+    return fold_text(first) == fold_text(second)
+
+
+def _contact_conflicts(facts: list[_ContactFact]) -> list[Conflict]:
+    """Names, e-mail addresses and phone numbers that differ between sources.
+
+    The profile shows the first source's value (see _read_contact). A different
+    value in a later source is not dropped silently: it becomes a conflict, so
+    the user decides which one belongs on the resume before confirming. Two
+    values inside ONE source (a work and a private address) are no disagreement.
+    """
+    conflicts = []
+    for name, label in CONTACT_CONFLICT_FIELDS.items():
+        stated = [fact for fact in facts if fact.field == name]
+        if not stated:
+            continue
+        accepted = [fact for fact in stated if fact.alias == stated[0].alias]
+        differing: list[_ContactFact] = []
+        for fact in stated:
+            known = [*accepted, *differing]
+            if not any(_same_contact_value(name, fact.value, other.value) for other in known):
+                differing.append(fact)
+        if differing:
+            conflicts.append(
+                Conflict(
+                    conflict_id=new_id(),
+                    field=f"contact_{name}",
+                    description=f"The sources give different {label}.",
+                    values=[
+                        ConflictValue(value=fact.value, source_ref=fact.ref)
+                        for fact in (stated[0], *differing)
+                    ],
+                )
+            )
+    return conflicts
 
 
 # ---- Merging duplicates and detecting conflicts ------------------------------------
@@ -519,16 +654,218 @@ def _read_conflict(
     )
 
 
+def _conflict_key(field: str, value: str) -> str:
+    """Comparison form of a conflicting value: a date by _date_key ("July 2022"
+    equals "Jul 2022"), anything else ignoring case and spacing."""
+    return _date_key(value) if field in DATE_FIELDS else fold_text(value)
+
+
+def _restates(field: str, value: str, shown: str) -> bool:
+    """Whether ``shown`` already says ``value``, possibly as part of a longer
+    text ("Jun 2022" inside "Jun 2022 - Jul 2024")."""
+    key = _conflict_key(field, value)
+    return bool(key) and key in _conflict_key(field, shown)
+
+
+def _same_disagreement(existing: Conflict, candidate: Conflict) -> bool:
+    """Whether ``candidate`` is a disagreement that ``existing`` already lists.
+
+    1. The same field of the same records: the plain case.
+    2. ``candidate`` was found by the server (dates, contact details) and
+       ``existing`` was reported by the model. The model's field label is free
+       text ("dates", "other") and the positions it counts can be wrong, so
+       the two are compared by value: it is the same disagreement when they
+       are about a common record (or the model's entry names none) and the
+       model's entry already shows every value of the server's.
+    """
+    existing_ids, candidate_ids = set(existing.record_ids), set(candidate.record_ids)
+    if existing.field == candidate.field and existing_ids == candidate_ids:
+        return True
+    if candidate.field not in SERVER_CHECKED_FIELDS:
+        return False
+    related = not existing_ids or bool(existing_ids & candidate_ids)
+    return related and all(
+        any(_restates(candidate.field, value.value, shown.value) for shown in existing.values)
+        for value in candidate.values
+    )
+
+
+def _with_exact_values(shown: list[ConflictValue], found: Conflict) -> list[ConflictValue]:
+    """The values of a conflict after the server found the same disagreement:
+    every shown value that one of the server's restates is replaced by the
+    server's (the stored field value with the line it was read from), the
+    others stay, and server values not shown yet are added."""
+    values: list[ConflictValue] = []
+    for value in shown:
+        exact = next(
+            (v for v in found.values if _restates(found.field, v.value, value.value)), value
+        )
+        if exact not in values:
+            values.append(exact)
+    return values + [value for value in found.values if value not in values]
+
+
 def _add_conflict(conflicts: list[Conflict], candidate: Conflict) -> None:
-    """Add ``candidate`` unless the same field of the same records is already
-    listed; in that case only values not yet shown are added to that entry."""
+    """Add ``candidate`` unless an entry already lists the same disagreement.
+
+    A finding of the server is exact, so its field name, record and values
+    then replace the model's label, counted positions and loosely written
+    values; the model's sentence stays as the description. Two entries of the
+    model about the same field and records are joined value by value.
+    """
     for existing in conflicts:
-        same_records = set(existing.record_ids) == set(candidate.record_ids)
-        if existing.field == candidate.field and same_records:
+        if not _same_disagreement(existing, candidate):
+            continue
+        if candidate.field in SERVER_CHECKED_FIELDS:
+            existing.field = candidate.field
+            existing.record_ids = list(candidate.record_ids)
+            existing.values = _with_exact_values(existing.values, candidate)
+        else:
             shown = {fold_text(value.value) for value in existing.values}
             existing.values.extend(v for v in candidate.values if fold_text(v.value) not in shown)
-            return
+        return
     conflicts.append(candidate)
+
+
+# ---- Profile-level notices ---------------------------------------------------------
+
+
+def _quoted_characters(
+    sources: list[PreparedSource], quoted: list[SourceRef]
+) -> dict[str, bytearray]:
+    """For every source, one flag per character of its original text: 1 where
+    the character lies inside a passage the draft quotes."""
+    flags = {source.doc.source_id: bytearray(len(source.doc.text)) for source in sources}
+    for ref in quoted:
+        flags[ref.source_id][ref.start : ref.end] = b"\x01" * (ref.end - ref.start)
+    return flags
+
+
+def _known_words(contact: Contact, records: list[ProfileRecord]) -> set[str]:
+    """The words of the facts the draft holds outside its statements: record
+    headers, skills and contact details."""
+    texts = [contact.name, contact.email, contact.phone, contact.location, *contact.links]
+    for record in records:
+        texts += [record.title, record.organization, record.location]
+        texts += [record.start_date, record.end_date, *record.skills]
+    return {word for text in texts if text for word in tokenize(text)}
+
+
+def _repeats_known_facts(line: str, known_words: set[str]) -> bool:
+    """Whether a line only lists facts the draft already holds, such as a
+    "Key technologies: Python, Redis" line whose items became skills, or a
+    line with nothing but a role's dates. A label before a colon is ignored."""
+    _, colon, listing = line.partition(":")
+    return set(tokenize(listing if colon and listing.strip() else line)) <= known_words
+
+
+def _uncaptured_lines(source: PreparedSource, flags: bytearray, known_words: set[str]) -> list[str]:
+    """The lines of a source that say something and are in no part of the draft.
+
+    A line is captured when at least half of it was quoted (as a header,
+    statement, summary, skill list or contact detail) or when it only repeats
+    facts the draft holds. Headings and labels (fewer than MIN_NOTICE_WORDS
+    content words) are not worth a notice, and a line addressed to an AI
+    system was left out on purpose.
+    """
+    missed = []
+    start = 0
+    for raw in source.doc.text.splitlines(keepends=True):
+        end = start + len(raw)
+        quoted_share = sum(flags[start:end]) / max(len(raw.strip()), 1)
+        start = end
+        line = _LIST_MARKER.sub("", raw.strip())
+        if len(tokenize(line)) < MIN_NOTICE_WORDS or looks_like_instruction(line):
+            continue
+        if quoted_share < MIN_QUOTED_SHARE and not _repeats_known_facts(line, known_words):
+            missed.append(line)
+    return missed
+
+
+def _uncaptured_message(label: str, lines: list[str]) -> str:
+    """ "2 lines of Resume were not captured: "..."; "...". Add ..." with the
+    first few lines, shortened, as plain-text excerpts."""
+    count = len(lines)
+    counted = "1 line" if count == 1 else f"{count} lines"
+    verb = "was" if count == 1 else "were"
+    excerpts = "; ".join(f'"{_shortened(line)}"' for line in lines[:MAX_NOTICE_EXCERPTS])
+    more = f" (and {count - MAX_NOTICE_EXCERPTS} more)" if count > MAX_NOTICE_EXCERPTS else ""
+    return (
+        f"{counted} of {label} {verb} not captured: {excerpts}{more}. "
+        "Add anything that matters to a record."
+    )
+
+
+def _shortened(line: str) -> str:
+    """The line itself, or its beginning followed by "..." when it is long."""
+    if len(line) <= MAX_NOTICE_EXCERPT_CHARS:
+        return line
+    return line[:MAX_NOTICE_EXCERPT_CHARS].rstrip() + "..."
+
+
+def _uncaptured_notices(
+    sources: list[PreparedSource],
+    quoted: list[SourceRef],
+    contact: Contact,
+    records: list[ProfileRecord],
+) -> list[ProfileNotice]:
+    """One notice per source with text that the draft does not hold.
+
+    The model can skip part of a source without saying so (seen on a real
+    profile: every result line under two publications). Nothing else would
+    tell the user, so the server compares the sources with what was quoted
+    from them. The notice informs; it does not block confirmation, because
+    leaving text out can be intended (a general summary paragraph).
+    """
+    flags = _quoted_characters(sources, quoted)
+    known_words = _known_words(contact, records)
+    notices = []
+    for source in sources:
+        missed = _uncaptured_lines(source, flags[source.doc.source_id], known_words)
+        if missed:
+            message = _uncaptured_message(source.doc.label, missed)
+            notices.append(ProfileNotice(code=NOTICE_UNCAPTURED, message=message))
+    return notices
+
+
+def completeness_notices(contact: Contact, records: list[ProfileRecord]) -> list[ProfileNotice]:
+    """What a resume normally shows but this profile does not hold: a name, a
+    way to reach the person, an education entry. Nothing is invented to fill
+    the gap and confirmation is not blocked; the user is told, because the
+    generated documents would otherwise come out with an empty letterhead or
+    without an education section and no word of warning."""
+    missing = []
+    if not contact.name:
+        missing.append(
+            (NOTICE_NO_NAME, "No name was found. Add it so that your documents carry your name.")
+        )
+    if not (contact.email or contact.phone):
+        missing.append(
+            (
+                NOTICE_NO_CONTACT,
+                "No e-mail address or phone number was found. Add one so that an "
+                "employer can reach you.",
+            )
+        )
+    if not any(record.category == "education" for record in records):
+        missing.append(
+            (
+                NOTICE_NO_EDUCATION,
+                "No education was found. Add your degree or programme if you have one; "
+                "without it a degree requirement cannot be shown as met.",
+            )
+        )
+    return [ProfileNotice(code=code, message=message) for code, message in missing]
+
+
+def notices_after_edit(
+    stored: list[ProfileNotice], contact: Contact, records: list[ProfileRecord]
+) -> list[ProfileNotice]:
+    """The notices of a profile the user just edited. Those about source text
+    stay (the sources did not change); the completeness ones are worked out
+    again, so adding a name removes the notice about the missing name."""
+    about_sources = [notice for notice in stored if notice.code == NOTICE_UNCAPTURED]
+    return [*about_sources, *completeness_notices(contact, records)]
 
 
 @dataclass(frozen=True)
@@ -538,6 +875,7 @@ class Draft:
     contact: Contact
     records: list[ProfileRecord]
     conflicts: list[Conflict]
+    notices: list[ProfileNotice]
 
 
 def build_draft(extraction: LLMExtraction, sources: list[PreparedSource]) -> Draft:
@@ -547,6 +885,7 @@ def build_draft(extraction: LLMExtraction, sources: list[PreparedSource]) -> Dra
     record_ids: list[str | None] = []
     # Every located header and statement, with the ID of the record it ended up in.
     passages: list[tuple[SourceRef, str]] = []
+    summary_refs: list[SourceRef] = []
     date_conflicts: list[Conflict] = []
 
     for llm_record in extraction.records:
@@ -568,24 +907,35 @@ def build_draft(extraction: LLMExtraction, sources: list[PreparedSource]) -> Dra
             _merge_into(target, incoming)
         record_ids.append(target.record.record_id)
         passages += [(ref, target.record.record_id) for ref in _located_passages(incoming.record)]
+        if incoming.summary_ref is not None:
+            summary_refs.append(incoming.summary_ref)
+
+    contact_facts = _verified_contact(extraction.contact, by_alias)
+    contact = _read_contact(contact_facts)
 
     # Model-reported conflicts first, so their descriptions are the ones kept
-    # when the deterministic date check found the same disagreement.
+    # when one of the server's own checks found the same disagreement.
     conflicts: list[Conflict] = []
     reported = [
         _read_conflict(item, record_ids, by_alias, passages) for item in extraction.conflicts
     ]
-    for conflict in [*(c for c in reported if c is not None), *date_conflicts]:
+    found = [*date_conflicts, *_contact_conflicts(contact_facts)]
+    for conflict in [*(c for c in reported if c is not None), *found]:
         _add_conflict(conflicts, conflict)
 
     records = _drop_repeated_skills([_finish_record(entry.record) for entry in entries])
     kept_ids = {record.record_id for record in records}
     for conflict in conflicts:
         conflict.record_ids = [rid for rid in conflict.record_ids if rid in kept_ids]
+    quoted = [*(ref for ref, _ in passages), *summary_refs, *(fact.ref for fact in contact_facts)]
     return Draft(
-        contact=_read_contact(extraction.contact, by_alias),
+        contact=contact,
         records=records,
         conflicts=conflicts[:MAX_CONFLICTS],
+        notices=[
+            *_uncaptured_notices(sources, quoted, contact, records),
+            *completeness_notices(contact, records),
+        ],
     )
 
 
@@ -687,6 +1037,7 @@ async def ingest_profile(
         contact=draft.contact,
         records=draft.records,
         conflicts=draft.conflicts,
+        notices=draft.notices,
         created_at=existing.created_at if existing else now,
         updated_at=now,
         expires_at=session.expires_at,
@@ -720,6 +1071,7 @@ async def ingest_profile(
         records=len(stored.records),
         needs_review=review.needs_review_count,
         unresolved_conflicts=review.unresolved_conflict_count,
+        notices=len(stored.notices),
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
     )

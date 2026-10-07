@@ -358,6 +358,12 @@ async def test_visitor_goes_from_sources_to_a_revalidated_draft_and_clears_their
         response = await client.request(
             method, url, json=body, headers=keyed(headers, "flow-after-delete")
         )
+        if (method, url) == ("DELETE", "/api/session"):
+            # The one exception (SEC-2): clearing may be repeated with the
+            # revoked token, and now finds nothing left to delete.
+            assert response.status_code == 200, response.text
+            assert set(response.json()["deleted_counts"].values()) == {0}
+            continue
         assert_error(response, 401, "unauthorized")
     assert await owned_counts(db, owner_id) == EMPTY
 

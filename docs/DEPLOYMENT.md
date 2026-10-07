@@ -109,7 +109,7 @@ Names only. Values for the first group are typed into the Render dashboard and e
 
 | Name | What it is |
 |---|---|
-| `MONGODB_URI` | The Atlas connection string from [3.4](#34-connection-string) |
+| `MONGODB_URI` | The Atlas connection string from [3.4](#34-connection-string). With `APP_ENV=production` the API refuses to start when this variable is absent or blank |
 | `OPENAI_API_KEY` | Used for both generation and embeddings |
 | `IP_HASH_SALT` | Random value that keys the hashing of client IPs in rate-limit counters. `render.yaml` asks Render to generate it; when creating the service by hand, add it with Render's "Generate" option. If it is absent the application derives a key from `MONGODB_URI` instead. |
 
@@ -127,17 +127,18 @@ Names only. Values for the first group are typed into the Render dashboard and e
 | `APP_ENV` | `production` | Turns on the production rules below |
 | `AI_PROVIDER` | `openai` | `fake` is refused in production |
 | `MONGODB_DATABASE` | `resume_tailor` | |
-| `TRUST_PROXY_HEADERS` | `true` | Client IP is read from `X-Forwarded-For`, because the socket peer is Render's proxy |
+| `TRUST_PROXY_HEADERS` | `true` | The client IP for the session limit is read from a proxy header, because the socket peer is Render's proxy |
+| `CLIENT_IP_HEADER` | `cf-connecting-ip` | The header read first. Render sits behind Cloudflare, which sets it itself. Without it the order is `cf-connecting-ip`, `true-client-ip`, then the `X-Forwarded-For` entry counted from the right with `TRUSTED_PROXY_HOPS` (default 1). The leftmost `X-Forwarded-For` entry is never used: the client writes it |
 | `OPENAI_MODEL` | `gpt-6-luna` | Only `gpt-6-luna` and `gpt-5.6-terra` are accepted |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | |
 | `OPENAI_EMBEDDING_DIMENSIONS` | `1536` | Must match the embedding model or startup fails |
 | `OPENAI_REASONING_EFFORT` | `low` | |
 | `RETRIEVAL_MODE` | `python` | The only implemented value |
 | `SESSION_TTL_HOURS` | `24` | |
-| `MAX_PROFILE_CHARS` | `60000` | |
+| `MAX_PROFILE_CHARS` | `30000` | Half the built-in default of 60000: extraction time grows with the length of the profile and has to fit into the provider timeout |
 | `MAX_JOB_CHARS` | `25000` | |
-| `PROVIDER_TIMEOUT_SECONDS` | `120` | |
-| `PROVIDER_MAX_RETRIES` | `2` | |
+| `PROVIDER_TIMEOUT_SECONDS` | `180` | The built-in default; an 18,000-character fictional profile took 47 s to extract |
+| `PROVIDER_MAX_RETRIES` | `1` | The built-in default is 2 |
 | `SESSION_CREATE_LIMIT_PER_HOUR` | `20` | Per client IP |
 | `GLOBAL_DAILY_AI_CALL_LIMIT` | `600` | Hard ceiling on provider calls per UTC day across all visitors |
 
@@ -238,7 +239,7 @@ How the application handles that:
 | Atlas M0: 0.5 GB storage, 500 connections, about 100 operations per second | See the storage note below |
 | Atlas pauses a free cluster after 30 days without any connection | Resume it in the Atlas console before a demo |
 
-**Storage note.** Each evidence chunk stores a 1536-number vector, and evidence of earlier profile versions is kept until the session expires (24 hours). Many sessions that each confirm a large profile repeatedly could approach the 0.5 GB limit. This has not been measured. If it becomes a concern, lower `QUOTA_CONFIRM` or `MAX_EVIDENCE_CHUNKS` through the environment; no code change is needed.
+**Storage note.** Each evidence chunk stores a 1536-number vector. Since 2026-10-07 a successful confirm deletes the session's evidence of earlier profile versions, except versions a stored draft was generated from, so repeated confirmation no longer adds a full copy each time. Many sessions with large profiles could still approach the 0.5 GB limit. This has not been measured. If it becomes a concern, lower `QUOTA_CONFIRM` or `MAX_EVIDENCE_CHUNKS` through the environment; no code change is needed.
 
 **Cost guard.** `GLOBAL_DAILY_AI_CALL_LIMIT` caps provider calls per UTC day across all visitors. When it is reached, AI actions answer `429 quota_exceeded` until the next UTC day. Set a monthly budget limit on the OpenAI account as well; the application's cap is not a billing control.
 
@@ -358,8 +359,8 @@ These points could not be established from the code or the documentation alone a
 |---|---|---|
 | `render.yaml` is accepted by Render as written | It has not been run through Render | Create the Blueprint, or create the services by hand with the same settings |
 | Which Node version the static site builds with | `engines` is an unbounded range | Read it in the build log; pin with `NODE_VERSION` |
-| How Render's proxy fills `X-Forwarded-For` | With `TRUST_PROXY_HEADERS=true` the API takes the **first** entry as the client address for the per-IP session limit. If the proxy appends to a header supplied by the client, a client could choose its own "address" and evade the limit; if every visitor appears under one proxy address, they would share one limit. | Send `curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/api/sessions -H "X-Forwarded-For: 203.0.113.9"` more than `SESSION_CREATE_LIMIT_PER_HOUR` times within an hour and see whether `429` appears. Each call creates an empty session that expires by itself. |
-| The whole flow against the real OpenAI models on the deployed service | Prompt behaviour, output-token limits and latency for `gpt-6-luna` under the 120-second per-call and 270-second per-generation limits | Checks 6 to 11 in section 8 |
+| Which header carries the client address on Render | With `TRUST_PROXY_HEADERS=true` and `CLIENT_IP_HEADER=cf-connecting-ip` the per-IP session limit is keyed on Cloudflare's header. If that header does not reach the application, the address falls back to `X-Forwarded-For` (counted from the right) or the socket peer, and visitors could share one limit. On a platform that does not set the header, a client could forge it. **Not checked on the deployed service after this change.** | After deploying, create a session and read the `session_create` log line in Render's Logs tab: `client_ip_source` should be `cf-connecting-ip`. The address itself is never logged. |
+| The whole flow against the real OpenAI models on the deployed service | Prompt behaviour, output-token limits and latency for `gpt-6-luna` under the 180-second per-call and 270-second per-generation limits (measured locally, not on the deployed service: see `backend/tests/smoke/README.md`) | Checks 6 to 11 in section 8 |
 | Behaviour of a returning visitor after a cold start | Only session creation retries through a wake-up | Check 18, plus reloading an existing workspace after the API has slept |
 | Storage growth on the free Atlas tier | See the storage note in section 7 | Atlas > cluster > metrics after real use |
 | `/docs`, `/redoc` and `/openapi.json` are publicly reachable | They expose the API's shape, not data or secrets; decide whether that is acceptable for a public deployment | Open `$API/docs` |

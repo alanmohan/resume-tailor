@@ -27,12 +27,14 @@ from app.providers.factory import get_provider
 from app.ratelimit import QuotaService
 from app.repositories import Repositories
 from app.schemas.generations import IDEMPOTENCY_KEY_MAX_LENGTH, IDEMPOTENCY_KEY_MIN_LENGTH
-from app.security import SessionContext, require_session
+from app.security import SessionContext, require_session, require_session_to_clear
 from app.services.sessions import SessionService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DbDep = Annotated[Database, Depends(get_db)]
 SessionDep = Annotated[SessionContext, Depends(require_session)]
+# Only for DELETE /api/session: also accepts a revoked session (see the dependency).
+ClearableSessionDep = Annotated[SessionContext, Depends(require_session_to_clear)]
 ProviderDep = Annotated[AIProvider, Depends(get_provider)]
 
 

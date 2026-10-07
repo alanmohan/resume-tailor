@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from app.config import Settings
 from app.db import Mongo
 from app.schemas.common import ProviderMode
+from app.schemas.sessions import Limits
+from app.services.sessions import limits_of
 
 router = APIRouter(tags=["health"])
 
@@ -26,6 +28,9 @@ class Readiness(BaseModel):
     status: Literal["ready", "not_ready"]
     checks: ReadinessChecks
     provider_mode: ProviderMode
+    # Reported here, without a session, so the Start page can show and apply
+    # the real limits before the visitor has submitted anything.
+    limits: Limits
 
 
 @router.get("/healthz")
@@ -51,5 +56,6 @@ async def readyz(request: Request) -> JSONResponse:
         status="ready" if ready else "not_ready",
         checks=checks,
         provider_mode=request.app.state.provider.mode,
+        limits=limits_of(settings),
     )
     return JSONResponse(body.model_dump(), status_code=200 if ready else 503)

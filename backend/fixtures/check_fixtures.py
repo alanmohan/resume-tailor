@@ -134,6 +134,36 @@ def check_injection_profile() -> list[str]:
     return problems
 
 
+def check_prose_profile() -> list[str]:
+    """Every expected header, statement, skill and paragraph must be in the
+    text, and the text must stay free of a name and contact details."""
+    problems = []
+    expected = load_json(PROFILES_DIR / "prose_expected.json")
+    text = (PROFILES_DIR / expected["source_file"]).read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    for record in expected["records"]:
+        if record["date_string"] is not None:
+            header = f"{record['title']} - {record['organization']} ({record['date_string']})"
+            if header not in lines:
+                problems.append(f"prose_profile.txt has no header line: {header}")
+        for statement in record["statements"]:
+            if statement not in lines and f"- {statement}" not in lines:
+                problems.append(f"prose_profile.txt has no statement line: {statement}")
+        for start in record["summary_paragraph_starts"]:
+            if not any(line.startswith(start) for line in lines):
+                problems.append(f"prose_profile.txt has no paragraph starting with: {start}")
+        for skill in record["skills"]:
+            if not mentions(text, skill):
+                problems.append(f"prose_profile.txt does not mention the skill: {skill}")
+    for label in expected["list_labels"]:
+        if label not in lines:
+            problems.append(f"prose_profile.txt has no list label line: {label}")
+    if "@" in text or "Education" in lines:
+        problems.append("prose_profile.txt must have no contact block and no education section")
+    return problems
+
+
 def check_synthetic_jobs() -> list[str]:
     """Keywords must be in the description; support must match the sample profile."""
     problems = []
@@ -218,6 +248,7 @@ def main() -> int:
         content_checks = [
             check_sample_profile,
             check_injection_profile,
+            check_prose_profile,
             check_synthetic_jobs,
             check_live_jobs,
             check_frontend_sample,

@@ -32,9 +32,27 @@ REASONING_EFFORTS = {"", "none", "minimal", "low", "medium", "high", "xhigh", "m
 
 DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
+# How the template .env.example marks a secret that still has to be filled in.
+PLACEHOLDER_PREFIX = "replace-with"
+
 
 class ConfigError(RuntimeError):
     """Raised at startup when the configuration is invalid. Never contains secret values."""
+
+
+def is_loopback_mongodb_uri(uri: str) -> bool:
+    """True when every host in a ``mongodb://`` URI is this machine.
+
+    ``mongodb+srv://`` always names a hosted cluster, so it is never loopback.
+    Used to keep test runs away from a real database: the root ``.env`` may
+    hold a production connection string, and a test server started without
+    overriding it would otherwise write test data there.
+    """
+    if not uri.startswith("mongodb://"):
+        return False
+    authority = uri.removeprefix("mongodb://").split("/", 1)[0]
+    hosts = authority.rsplit("@", 1)[-1].split(",")
+    return all(host.rsplit(":", 1)[0] in {"127.0.0.1", "localhost", "[::1]"} for host in hosts)
 
 
 class Settings(BaseSettings):
@@ -49,6 +67,8 @@ class Settings(BaseSettings):
     mongodb_uri: SecretStr = SecretStr("mongodb://127.0.0.1:27017")
     mongodb_database: str = "resume_tailor_dev"
     mongodb_server_selection_timeout_ms: int = Field(default=5000, ge=100, le=60000)
+    # APP_ENV=test refuses a non-local MONGODB_URI unless this is switched on.
+    allow_remote_test_database: bool = False
 
     # NoDecode: read the raw comma-separated string instead of expecting JSON.
     cors_origins: Annotated[list[str], NoDecode] = DEFAULT_CORS_ORIGINS
@@ -70,7 +90,9 @@ class Settings(BaseSettings):
     max_evidence_chunks: int = Field(default=200, ge=1)
     max_requirements: int = Field(default=25, ge=1)
 
-    provider_timeout_seconds: float = Field(default=120, gt=0)
+    # Extracting a long profile is the slowest call: 47 s was measured for
+    # 18,000 characters, and the time grows with the length of the text.
+    provider_timeout_seconds: float = Field(default=180, gt=0)
     provider_max_retries: int = Field(default=2, ge=0, le=5)
     # Reasoning tokens count against these limits, so they are sized generously.
     max_output_tokens_extraction: int = Field(default=32_000, ge=256)
@@ -94,7 +116,14 @@ class Settings(BaseSettings):
     quota_validation: int = Field(default=40, ge=0)
     global_daily_ai_call_limit: int = Field(default=600, ge=0)
 
+    # The three settings below decide where the client IP for the session
+    # rate limit is read from; see ratelimit.client_address.
     trust_proxy_headers: bool = False
+    # Header in which the platform itself reports the client IP, e.g.
+    # "cf-connecting-ip" on Render. Only read when TRUST_PROXY_HEADERS is on.
+    client_ip_header: str | None = None
+    # Number of trusted proxies that append to X-Forwarded-For.
+    trusted_proxy_hops: int = Field(default=1, ge=1, le=10)
     # Key for hashing client IPs in rate-limit counters. Optional: see ip_hash_key.
     ip_hash_salt: SecretStr | None = None
 
@@ -121,9 +150,22 @@ class Settings(BaseSettings):
     @field_validator("openai_api_key", "ip_hash_salt", mode="before")
     @classmethod
     def _blank_secret_is_missing(cls, value: object) -> object:
-        """Treat an empty value (for example ``OPENAI_API_KEY=``) as not configured."""
-        if isinstance(value, str) and not value.strip():
-            return None
+        """Treat an empty value (for example ``OPENAI_API_KEY=``) and the
+        template's "replace-with-..." placeholder as not configured. A copied
+        .env.example must not look like a working key: the first provider call
+        would fail instead of the readiness check saying what is missing."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped or stripped.lower().startswith(PLACEHOLDER_PREFIX):
+                return None
+        return value
+
+    @field_validator("client_ip_header", mode="before")
+    @classmethod
+    def _normalise_header_name(cls, value: object) -> object:
+        """Header names are case-insensitive; an empty value means "not set"."""
+        if isinstance(value, str):
+            return value.strip().lower() or None
         return value
 
     @field_validator("retrieval_mode")
@@ -159,6 +201,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"APP_ENV=test requires MONGODB_DATABASE to start with '{TEST_DATABASE_PREFIX}'"
             )
+        if (
+            self.app_env == "test"
+            and not self.allow_remote_test_database
+            and not is_loopback_mongodb_uri(self.mongodb_uri.get_secret_value())
+        ):
+            raise ValueError(
+                "APP_ENV=test requires MONGODB_URI to point at 127.0.0.1 or localhost, so a "
+                "test run can never touch a hosted database (for example one configured in "
+                ".env); set MONGODB_URI=mongodb://127.0.0.1:27017, or "
+                "ALLOW_REMOTE_TEST_DATABASE=true for a dedicated test cluster"
+            )
         if self.app_env == "production":
             self._check_production_rules()
         return self
@@ -170,6 +223,12 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is required when APP_ENV=production")
         if "cors_origins" not in self.model_fields_set:
             raise ValueError("CORS_ORIGINS must be set explicitly when APP_ENV=production")
+        # Without this rule a deployment that lacks the variable starts anyway,
+        # looks for a database on its own machine and only ever reports
+        # "database unavailable".
+        uri_is_set = "mongodb_uri" in self.model_fields_set
+        if not uri_is_set or not self.mongodb_uri.get_secret_value().strip():
+            raise ValueError("MONGODB_URI must be set explicitly when APP_ENV=production")
 
     @property
     def provider_configured(self) -> bool:

@@ -113,15 +113,23 @@ def test_rating_without_valid_evidence_becomes_uncertain(status: str) -> None:
 
 
 def test_kubernetes_is_not_supported_by_evidence_that_only_mentions_docker() -> None:
+    # Kubernetes is nowhere in the profile, so the requirement is missing.
     item = assess_requirement(KUBERNETES, proposal("supported", "ev-docker"), EVIDENCE_TEXTS)
-    assert item.status == "uncertain"
-    assert item.rationale == "The cited evidence does not mention: Kubernetes."
+    assert (item.status, item.evidence_ids) == ("missing", [])
+    assert item.rationale == (
+        "No evidence of Kubernetes was found in the supplied profile. "
+        "That does not mean you lack it: add it to your profile if you have it."
+    )
 
 
 def test_supported_becomes_partial_when_only_some_terms_are_in_the_evidence() -> None:
     item = assess_requirement(BOTH, proposal("supported", "ev-docker"), EVIDENCE_TEXTS)
     assert item.status == "partial"
-    assert item.rationale == "The cited evidence mentions Docker but not Kubernetes."
+    # The model's sentence stays; the server's reason follows it.
+    assert item.rationale == (
+        "Model rationale. The cited evidence mentions Docker but not Kubernetes, "
+        "so this is rated partial."
+    )
     # A model's "partial" already says that, so it is kept with its own rationale.
     kept = assess_requirement(BOTH, proposal("partial", "ev-docker"), EVIDENCE_TEXTS)
     assert (kept.status, kept.rationale) == ("partial", "Model rationale.")
@@ -131,7 +139,10 @@ def test_fewer_than_half_of_the_named_terms_is_not_even_partial() -> None:
     for status in ("supported", "partial"):
         item = assess_requirement(TOOLBOX, proposal(status, "ev-docker"), EVIDENCE_TEXTS)
         assert item.status == "uncertain"
-        assert item.rationale == "The cited evidence does not mention: Helm, Kafka, Terraform."
+        assert item.rationale == (
+            "Model rationale. The cited evidence does not mention Terraform, Helm or Kafka, "
+            "so this rating could not be confirmed."
+        )
 
 
 def test_metric_named_by_a_requirement_must_be_shown_for_the_same_thing() -> None:
@@ -267,7 +278,7 @@ def test_keyword_of_another_requirement_is_caught_however_it_is_spelled() -> Non
 
 
 def test_override_marks_the_item_as_corrected_and_keeps_its_evidence() -> None:
-    item = assess_requirement(KUBERNETES, proposal("supported", "ev-docker"), EVIDENCE_TEXTS)
+    item = assess_requirement(BOTH, proposal("supported", "ev-docker"), EVIDENCE_TEXTS)
     apply_override(item, "partial", "Used it in a course project.")
     assert (item.status, item.user_corrected, item.note) == (
         "partial",

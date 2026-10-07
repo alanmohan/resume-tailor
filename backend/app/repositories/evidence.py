@@ -130,3 +130,13 @@ class EvidenceRepository(OwnedRepository[EvidenceDoc]):
             {"owner_id": owner_id, "profile_id": profile_id, "profile_version": profile_version}
         )
         return result.deleted_count
+
+    async def delete_versions_except(self, owner_id: str, keep_versions: list[int]) -> int:
+        """Remove the owner's evidence of every profile version that is not in
+        ``keep_versions``; returns how many records were removed. Each record
+        carries a vector of about 20 kB, so versions nothing refers to any
+        more must not pile up."""
+        result = await self._collection.delete_many(
+            {"owner_id": owner_id, "profile_version": {"$nin": keep_versions}}
+        )
+        return result.deleted_count

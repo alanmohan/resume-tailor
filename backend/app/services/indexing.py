@@ -3,7 +3,8 @@
 
 ``build_evidence`` turns the reviewed profile into evidence records: one per
 semantic unit (a record's overview, its summary, each bullet, each skill
-group), not arbitrary slices of text. ``confirm_profile`` stores them, embeds
+group, the skills listed under a role or project), not arbitrary slices of
+text. ``confirm_profile`` stores them, embeds
 the ones that have no vector yet and only then marks the profile as indexed.
 
 Evidence IDs are derived from the profile version and the record's position
@@ -54,12 +55,24 @@ from app.security import SessionContext
 from app.services.ingestion import PreparedSource, prepare_source
 from app.services.profile_service import load_profile, version_conflict
 from app.services.sessions import SessionService
-from app.services.textutil import chunk_text, content_hash, fold_text, strip_contact_details
+from app.services.textutil import (
+    chunk_text,
+    content_hash,
+    fold_text,
+    split_lines,
+    strip_contact_details,
+)
 
 logger = logging.getLogger(__name__)
 
 CHUNK_MIN_WORDS = 100
 CHUNK_MAX_WORDS = 250
+# A record's summary is running prose that usually covers several pieces of
+# work. It is cut into smaller chunks than a single statement, so that a
+# citation opens the supporting passage rather than the whole description and
+# one embedding stands for one topic.
+SUMMARY_MIN_WORDS = 40
+SUMMARY_MAX_WORDS = 120
 # Texts per embedding call. Kept below the provider client's own request size
 # (64), so one batch is exactly one provider call and one progress update.
 EMBED_BATCH_SIZE = 50
@@ -95,6 +108,10 @@ class _Unit:
     # Where the statement is written in a source; None for the user's own
     # statements and for extracted text whose source span was not found.
     ref: SourceRef | None
+    # Evidence category when it is not the record's own (see _skills_unit).
+    category: str | None = None
+    # True for a record's summary paragraph, which is chunked more finely.
+    is_summary: bool = False
 
 
 def _context(record: ProfileRecord) -> str:
@@ -130,11 +147,81 @@ def _overview(record: ProfileRecord) -> str:
     return ", ".join(part for part in (dates, record.location) if part)
 
 
+def _term_pattern(term: str) -> re.Pattern[str]:
+    """Matches ``term`` (in comparison form) as a whole term, so "Java" is not
+    found inside "JavaScript" and "C" is not found inside "C++"."""
+    return re.compile(rf"(?<![\w+#]){re.escape(term)}(?![\w+#])")
+
+
+def _next_header_start(header: SourceRef, records: list[ProfileRecord]) -> int | None:
+    """Where the next record begins in the same source, or None for the last
+    one. A record's text lies between its own header and that position."""
+    later = [
+        other.source_ref.start
+        for other in records
+        if other.source_ref is not None
+        and other.source_ref.source_id == header.source_id
+        and other.source_ref.start > header.start
+    ]
+    return min(later, default=None)
+
+
+def _skills_line(
+    record: ProfileRecord, records: list[ProfileRecord], sources: dict[str, PreparedSource]
+) -> SourceRef | None:
+    """Where the record's skills are written: the first line of the record's
+    own text that names every one of them. None when there is no such line
+    (the skills are spread over several lines, or the header was not found).
+
+    The search stops at the next record's header. Otherwise the skills line of
+    a later role could be shown, and cited, as text of this one.
+    """
+    header = record.source_ref
+    source = sources.get(header.source_id) if header else None
+    if header is None or source is None:
+        return None
+    wanted = [_term_pattern(fold_text(skill)) for skill in record.skills]
+    region_end = _next_header_start(header, records)
+    for line in split_lines(source.doc.text, header.start, region_end):
+        folded = fold_text(line.text)
+        if all(pattern.search(folded) for pattern in wanted):
+            return SourceRef(
+                source_id=header.source_id,
+                source_label=source.doc.label,
+                start=line.start,
+                end=line.end,
+                excerpt=line.text,
+            )
+    return None
+
+
+def _skills_unit(
+    record: ProfileRecord, records: list[ProfileRecord], sources: dict[str, PreparedSource]
+) -> _Unit | None:
+    """The skills listed under a role, project or publication as one statement,
+    "Skills: Python, SQL". Without it a skill written only under a role would
+    be in no evidence text, so it could be neither retrieved nor cited and
+    would be rejected as "not mentioned in your confirmed profile".
+
+    Its category is "skill" while it stays evidence of its record, so a bullet
+    of that role may cite it. A skill group needs no such unit: its overview
+    already is the skill list.
+    """
+    if record.category == "skill" or not record.skills:
+        return None
+    listing = f"Skills: {', '.join(record.skills)}"
+    ref = _skills_line(record, records, sources) if record.provenance == "extracted" else None
+    return _Unit(None, listing, listing, record.provenance, ref, category="skill")
+
+
 def _record_units(
-    record: ProfileRecord, context: str, sources: dict[str, PreparedSource]
+    record: ProfileRecord,
+    context: str,
+    records: list[ProfileRecord],
+    sources: dict[str, PreparedSource],
 ) -> list[_Unit]:
-    """The semantic units of one record: its overview, its summary paragraph
-    and each of its statements."""
+    """The semantic units of one record: its overview, its summary paragraph,
+    each of its statements and the skills listed under it."""
     units = []
     overview = _overview(record)
     if overview or record.category != "skill":
@@ -147,11 +234,17 @@ def _record_units(
         header = record.source_ref if record.provenance == "extracted" else None
         source = sources.get(header.source_id) if header else None
         ref = source.locate(record.summary, header.start) if source and header else None
-        units.append(_Unit(None, record.summary, record.summary, record.provenance, ref))
+        summary = _Unit(
+            None, record.summary, record.summary, record.provenance, ref, is_summary=True
+        )
+        units.append(summary)
     units.extend(
         _Unit(bullet.bullet_id, bullet.text, bullet.text, bullet.provenance, bullet.source_ref)
         for bullet in record.bullets
     )
+    skills = _skills_unit(record, records, sources)
+    if skills is not None:
+        units.append(skills)
     return units
 
 
@@ -191,15 +284,20 @@ def _skill_patterns(records: list[ProfileRecord]) -> dict[str, re.Pattern[str]]:
         for skill in record.skills:
             for term in (fold_text(skill), fold_text(skill.partition("(")[0])):
                 if term:
-                    patterns[term] = re.compile(rf"(?<![\w+#]){re.escape(term)}(?![\w+#])")
+                    patterns[term] = _term_pattern(term)
     return patterns
 
 
 def _chunks(unit: _Unit) -> list[str]:
-    """The unit's statement split into chunks of roughly 100-250 words. An
-    overview without dates or location has nothing to split, but it still
-    states that the role or project exists, so it yields one empty chunk."""
-    chunks = chunk_text(unit.body, CHUNK_MIN_WORDS, CHUNK_MAX_WORDS)
+    """The unit's statement split into chunks: roughly 100-250 words for a
+    statement, and 40-120 words, also cut at single line breaks, for a summary
+    paragraph. An overview without dates or location has nothing to split, but
+    it still states that the role or project exists, so it yields one empty
+    chunk."""
+    if unit.is_summary:
+        chunks = chunk_text(unit.body, SUMMARY_MIN_WORDS, SUMMARY_MAX_WORDS, split_at_lines=True)
+    else:
+        chunks = chunk_text(unit.body, CHUNK_MIN_WORDS, CHUNK_MAX_WORDS)
     return [chunk.text for chunk in chunks] or [""]
 
 
@@ -238,7 +336,7 @@ def build_evidence(
             title=record.title,
             organization=record.organization,
         )
-        for unit in _record_units(record, context, sources):
+        for unit in _record_units(record, context, profile.records, sources):
             chunks = _chunks(unit)
             for chunk in chunks:
                 statement = " ".join(strip_contact_details(chunk).split())
@@ -264,7 +362,7 @@ def build_evidence(
                         provenance=unit.provenance,
                         excerpt=excerpt,
                         text=text,
-                        category=record.category,
+                        category=unit.category or record.category,
                         tags=[tag for tag, term in skill_patterns.items() if term.search(folded)],
                         parent=parent,
                         embedding_model=embedding_model,
@@ -407,6 +505,22 @@ class _IndexRun:
             await self._set_state("indexing", embedded)
         return usage
 
+    async def _prune_old_versions(self) -> int:
+        """Delete the evidence of earlier profile versions that nothing needs
+        any more; returns how many records were removed.
+
+        Kept are the version just indexed and every version a stored draft was
+        written from (a stale draft still opens its citations and is
+        revalidated against them). Without this each confirm would leave a
+        full copy of the profile's vectors behind until the session expires,
+        and a few visitors could fill the database. It runs only after the new
+        version is indexed, so the embedding cache has already copied the
+        vectors of unchanged statements.
+        """
+        cited = await self.repos.generations.profile_versions(self.owner_id)
+        keep = sorted({self.profile.version, *cited})
+        return await self.repos.evidence.delete_versions_except(self.owner_id, keep)
+
     async def run(self) -> ProfileDoc:
         profile, total = self.profile, len(self.expected)
         pending = await self._store_missing()
@@ -425,11 +539,13 @@ class _IndexRun:
             raise VersionConflict(
                 "The profile changed while it was being indexed. Review it and confirm again."
             )
+        pruned = await self._prune_old_versions()
         log_event(
             logger,
             logging.INFO,
             "profile_indexed",
             chunks=total,
+            pruned_chunks=pruned,
             embedded_now=len(pending),
             embedding_model=self.provider.embedding_model,
             embedding_tokens=usage.embedding_tokens,

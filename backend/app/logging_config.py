@@ -20,6 +20,11 @@ request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
 HANDLER_NAME = "resume-tailor-json"
 
+# Libraries that log request URLs or payload details at INFO/DEBUG; only their
+# warnings and errors are let through. "httpx2"/"httpcore2" are what the
+# OpenAI SDK sends its requests with, "httpx"/"httpcore" what other clients use.
+QUIET_LIBRARY_LOGGERS = ("httpx", "httpx2", "httpcore", "httpcore2", "openai", "pymongo")
+
 _REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"), "Bearer [REDACTED]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"), "[REDACTED_API_KEY]"),
@@ -119,6 +124,5 @@ def configure_logging(level: int = logging.INFO) -> None:
         uvicorn_logger.propagate = True
     logging.getLogger("uvicorn.access").disabled = True
 
-    # These libraries log request URLs or payload details at INFO/DEBUG.
-    for name in ("httpx", "httpcore", "openai", "pymongo"):
+    for name in QUIET_LIBRARY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
