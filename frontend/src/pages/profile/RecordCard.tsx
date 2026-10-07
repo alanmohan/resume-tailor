@@ -6,8 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { ProfileRecord } from '@/lib/types'
+import { focusSoon } from '@/pages/job/focusSoon'
 import { ItemMeta } from './ItemMeta'
 import {
+  addRecordButtonId,
   newBullet,
   recordDisplayName,
   recordFieldsChanged,
@@ -51,13 +53,44 @@ export function RecordCard({
   const id = `record-${record.key}`
   const isSkillGroup = record.category === 'skill'
 
+  /*
+   * Remove and Undo take away the very button that was pressed. Without help
+   * keyboard focus would fall back to the top of the page, so each of these
+   * actions sends it to the nearest control that still makes sense. The
+   * element is looked up by id after React has drawn the new state.
+   */
+  function handleRemove() {
+    onRemove()
+    // A stored record leaves an Undo row; an unsaved one is gone, so use the section's Add button.
+    focusSoon(
+      () =>
+        document.getElementById(`${id}-undo`) ??
+        document.getElementById(addRecordButtonId(section.category)),
+    )
+  }
+
+  function handleRestore() {
+    onRestore()
+    focusSoon(() => document.getElementById(`${id}-title`))
+  }
+
+  function removeBullet(index: number) {
+    const next = record.bullets.at(index + 1)
+    onChange({ bullets: record.bullets.filter((_, position) => position !== index) })
+    // The bullet that moves up into the gap, or the Add button after the last one.
+    focusSoon(() =>
+      document.getElementById(next ? `${id}-bullet-${next.key}` : `${id}-add-bullet`),
+    )
+  }
+
   if (record.removed) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed px-4 py-3 text-sm">
-        <p>
+        {/* wrap-anywhere: a long title without spaces must not widen the page. */}
+        <p className="min-w-0 wrap-anywhere">
           <span className="font-medium">{name}</span> will be removed when you save.
         </p>
-        <Button type="button" variant="outline" size="sm" onClick={onRestore}>
+        <Button id={`${id}-undo`} type="button" variant="outline" size="sm" onClick={handleRestore}>
           <Undo2 aria-hidden="true" />
           Undo
         </Button>
@@ -96,7 +129,7 @@ export function RecordCard({
             variant="ghost"
             size="sm"
             aria-label={`Remove ${name}`}
-            onClick={onRemove}
+            onClick={handleRemove}
           >
             <Trash2 aria-hidden="true" />
             <span className="hidden sm:inline">Remove</span>
@@ -196,6 +229,7 @@ export function RecordCard({
                   <li key={bullet.key} className="space-y-1.5">
                     <div className="flex items-start gap-2">
                       <Textarea
+                        id={`${id}-bullet-${bullet.key}`}
                         rows={2}
                         value={bullet.text}
                         aria-label={`Bullet ${index + 1} of ${name}`}
@@ -206,9 +240,7 @@ export function RecordCard({
                         variant="ghost"
                         size="icon"
                         aria-label={`Remove bullet ${index + 1} of ${name}`}
-                        onClick={() =>
-                          onChange({ bullets: record.bullets.filter((item) => item.key !== bullet.key) })
-                        }
+                        onClick={() => removeBullet(index)}
                       >
                         <Trash2 aria-hidden="true" />
                       </Button>
@@ -218,6 +250,7 @@ export function RecordCard({
                 ))}
               </ul>
               <Button
+                id={`${id}-add-bullet`}
                 type="button"
                 variant="outline"
                 size="sm"

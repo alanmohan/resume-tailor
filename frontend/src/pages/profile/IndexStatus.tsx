@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { CircleCheck, Info, TriangleAlert } from 'lucide-react'
 import { ErrorAlert, LoadingBlock } from '@/components/app'
@@ -8,6 +9,26 @@ import { isProfileReady } from '@/lib/hooks'
 import type { Profile } from '@/lib/types'
 import { indexProgressLabel } from './profileDraft'
 
+/** How long the embedded count may stand still before indexing is treated as stopped. */
+export const INDEX_STALL_MS = 20_000
+
+/**
+ * True once the embedded count has not moved for INDEX_STALL_MS while the
+ * server still reports "indexing". That is what a profile looks like after
+ * the server was restarted in the middle of a run: nothing is working on it.
+ */
+function useIndexingStalled(watching: boolean, embedded: number): boolean {
+  /** The count the timer last ran out on. A different current count means progress was made. */
+  const [stalledCount, setStalledCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!watching) return
+    // Every change of the count restarts the timer.
+    const timer = window.setTimeout(() => setStalledCount(embedded), INDEX_STALL_MS)
+    return () => window.clearTimeout(timer)
+  }, [watching, embedded])
+  return watching && stalledCount === embedded
+}
+
 interface IndexStatusProps {
   profile: Profile
   /** A confirm request from this page is running. */
@@ -16,22 +37,48 @@ interface IndexStatusProps {
   confirmError: unknown
   /** The draft has edits that are not saved yet. */
   hasUnsavedChanges: boolean
+  /** The session already has a generated draft, so this profile was confirmed before. */
+  hasDrafts: boolean
   onRetry: () => void
 }
 
 /**
  * Where the profile stands on the way to generation: draft, indexing (with
- * live counts), failed (recoverable), confirmed, or edited after confirming.
+ * live counts, or stopped), failed (recoverable), confirmed, or changed after
+ * confirming.
  */
 export function IndexStatus({
   profile,
   isConfirming,
   confirmError,
   hasUnsavedChanges,
+  hasDrafts,
   onRetry,
 }: IndexStatusProps) {
+  const { total, embedded } = profile.index_progress
+  // Only a run this page did not start can be orphaned; its own request is still open.
+  const stalled = useIndexingStalled(!isConfirming && profile.index_state === 'indexing', embedded)
+
+  if (stalled) {
+    return (
+      <Alert role="status" className="border-warning/40">
+        <TriangleAlert aria-hidden="true" className="text-warning" />
+        <AlertTitle>Indexing seems to have stopped</AlertTitle>
+        <AlertDescription>
+          The count has stayed at {embedded} of {total} evidence records, which usually means the
+          server was restarted. Nothing was lost: confirm the profile again to resume indexing.
+        </AlertDescription>
+        {/* Outside AlertDescription, which styles every link inside it as underlined text. */}
+        <div className="col-start-2 mt-2">
+          <Button type="button" size="sm" onClick={onRetry}>
+            Confirm again
+          </Button>
+        </div>
+      </Alert>
+    )
+  }
+
   if (isConfirming || profile.index_state === 'indexing') {
-    const { total, embedded } = profile.index_progress
     return (
       <div className="space-y-3 rounded-xl border p-4">
         <LoadingBlock label={indexProgressLabel(profile)} lines={0} />
@@ -87,13 +134,16 @@ export function IndexStatus({
     )
   }
 
-  if (profile.indexed_version !== null) {
+  // Not ready, although it was confirmed before. The server may or may not keep
+  // indexed_version after an edit, so an existing draft counts as proof as well:
+  // a draft can only have been generated from a confirmed profile.
+  if (profile.indexed_version !== null || hasDrafts) {
     return (
       <Alert role="status" className="border-warning/40">
         <TriangleAlert aria-hidden="true" className="text-warning" />
         <AlertTitle>Confirm again before generating</AlertTitle>
         <AlertDescription>
-          You edited the profile after confirming it. Drafts are only generated from a confirmed,
+          You changed the profile after confirming it. Drafts are only generated from a confirmed,
           fully indexed profile, so confirm it again to index your changes.
         </AlertDescription>
       </Alert>

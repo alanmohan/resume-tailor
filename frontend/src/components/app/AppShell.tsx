@@ -16,13 +16,14 @@ export const FOOTER_DISCLAIMER = 'Drafting assistant - review every claim before
 /** Shown instead of the page when the server no longer accepts the session token. */
 function SessionExpired() {
   const resetSession = useResetSession()
+  const { limits } = useSession()
   return (
     <EmptyState
       icon={TimerOff}
       title="Your session has ended"
       description={
         <p>
-          Sessions last 24 hours and are tied to one browser tab. The data stored for this
+          Sessions last {limits.session_ttl_hours} hours and are tied to one browser tab. The data stored for this
           session is deleted automatically, so it can no longer be opened. Start again to
           create a new profile.
         </p>

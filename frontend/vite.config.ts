@@ -29,6 +29,11 @@ export default defineConfig({
     // Many tests render the whole app and wait for mocked network round
     // trips. The default 5 s is too tight when the machine is busy (several
     // test files run in parallel); a passing test is not slowed down by this.
+    // The matching limit for one findBy.../waitFor is set in src/test/setup.ts.
     testTimeout: 20_000,
+    // Each worker runs a full browser-like environment. With one worker per
+    // CPU core the files starve each other on a busy machine and tests time
+    // out in a different file on every run; three at a time stayed stable.
+    maxWorkers: 3,
   },
 })

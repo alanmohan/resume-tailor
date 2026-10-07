@@ -7,14 +7,16 @@ import { ErrorAlert, PageHeader, StatusBadge } from '@/components/app'
 import { Button } from '@/components/ui/button'
 import { confirmProfile, updateProfile } from '@/lib/api'
 import { isApiError } from '@/lib/errors'
-import { isProfileReady } from '@/lib/hooks'
+import { isProfileReady, useLatestGenerationId } from '@/lib/hooks'
 import { mutationKeys, queryKeys } from '@/lib/queryKeys'
 import type { ConflictResolutionInput, Profile, RecordCategory } from '@/lib/types'
 import { ConflictPanel } from './ConflictPanel'
 import { ContactCard } from './ContactCard'
 import { IndexStatus } from './IndexStatus'
+import { ProfileNotices } from './ProfileNotices'
 import {
   CATEGORY_SECTIONS,
+  addRecordButtonId,
   draftFromProfile,
   isDirty,
   newRecord,
@@ -50,6 +52,7 @@ export function ProfileReview({ profile }: ProfileReviewProps) {
   const dirty = isDirty(draft, profile)
   const openConflicts = unresolvedConflicts(profile.conflicts)
   const ready = isProfileReady(profile)
+  const hasDrafts = useLatestGenerationId(true) !== null
 
   /** Cache a profile returned by the server, discarding any poll still in flight. */
   async function storeProfile(next: Profile) {
@@ -176,11 +179,14 @@ export function ProfileReview({ profile }: ProfileReviewProps) {
           .join(', ')}
       </p>
 
+      <ProfileNotices notices={profile.notices ?? []} />
+
       <IndexStatus
         profile={profile}
         isConfirming={confirm.isPending}
         confirmError={confirm.error}
         hasUnsavedChanges={dirty}
+        hasDrafts={hasDrafts}
         onRetry={handleConfirm}
       />
 
@@ -217,6 +223,7 @@ export function ProfileReview({ profile }: ProfileReviewProps) {
                   {section.heading}
                 </h2>
                 <Button
+                  id={addRecordButtonId(section.category)}
                   type="button"
                   variant="outline"
                   size="sm"

@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,12 +24,19 @@ function parseSkills(text: string): string[] {
 /** Skills as removable chips, plus an input that accepts one skill or a comma-separated list. */
 export function SkillsEditor({ id, label, skills, onChange }: SkillsEditorProps) {
   const [pending, setPending] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
 
   function addPending() {
     const existing = new Set(skills.map((skill) => skill.toLowerCase()))
     const additions = parseSkills(pending).filter((skill) => !existing.has(skill.toLowerCase()))
     if (additions.length > 0) onChange([...skills, ...additions])
     setPending('')
+  }
+
+  function removeSkill(index: number) {
+    onChange(skills.filter((_, position) => position !== index))
+    // The pressed chip disappears; continue in the input instead of losing keyboard focus.
+    inputRef.current?.focus()
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -54,7 +61,7 @@ export function SkillsEditor({ id, label, skills, onChange }: SkillsEditorProps)
                   size="icon-xs"
                   className="size-5 rounded-full"
                   aria-label={`Remove ${skill}`}
-                  onClick={() => onChange(skills.filter((_, position) => position !== index))}
+                  onClick={() => removeSkill(index)}
                 >
                   <X aria-hidden="true" />
                 </Button>
@@ -66,6 +73,7 @@ export function SkillsEditor({ id, label, skills, onChange }: SkillsEditorProps)
       <div className="flex gap-2">
         <Input
           id={`${id}-input`}
+          ref={inputRef}
           value={pending}
           placeholder="Add a skill, or several separated by commas"
           autoComplete="off"

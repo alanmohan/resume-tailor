@@ -178,6 +178,8 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
     `${SAMPLE_JOB.title} role at ${SAMPLE_JOB.company}`,
   )
   await expect(coverLetter.getByText('No citation needed').first()).toBeVisible()
+  // The application closes the letter itself, with the name from the confirmed profile.
+  await expect(coverLetter.locator('.ws-letter-signoff')).toHaveText(/^Sincerely,\s*Jordan Rivera$/)
   await screenshot(page, 'desktop-7-workspace-cover-letter')
   await page.getByRole('tab', { name: 'Resume' }).click()
 

@@ -33,6 +33,7 @@ import {
   isFlagged,
   jobLabel,
   listClaims,
+  needsExportReview,
   numberEvidence,
   type DocumentKind,
 } from './workspaceModel'
@@ -75,6 +76,8 @@ export function Workspace({ generation }: { generation: Generation }) {
   const [exportGateOpen, setExportGateOpen] = useState(false)
   /** The export the review dialog was opened for. Kept after it closes, so its wording stays put. */
   const [gatedAction, setGatedAction] = useState<ExportAction>('print')
+  /** The draft revision whose flagged statements the user agreed to print as they are. */
+  const [printAcknowledgedRevision, setPrintAcknowledgedRevision] = useState<number | null>(null)
   /** The control that opened the dialog or sheet, so focus can return to it. */
   const overlayOpener = useRef<HTMLElement | null>(null)
   /** A statement to go to once the open dialog or sheet has closed. */
@@ -85,6 +88,14 @@ export function Workspace({ generation }: { generation: Generation }) {
   const flagged = claims.filter(({ claim }) => isFlagged(claim))
   const evidenceNumbers = numberEvidence(generation)
   const needsRevalidation = generation.validation.state === 'needs_revalidation'
+  const reviewRequired = needsExportReview(generation)
+  /**
+   * Whether the print stylesheet may show the document. The browser's own
+   * print command (Ctrl/Cmd+P, the browser menu) never passes through the
+   * Print button, so the review gate has to hold in the stylesheet as well:
+   * until the user has acknowledged this revision, paper gets a notice instead.
+   */
+  const printReady = !reviewRequired || printAcknowledgedRevision === generation.revision
 
   const showingCoverageTab = !twoPane && coverageTabOpen
   const mainTab = showingCoverageTab ? COVERAGE_TAB : activeDocument
@@ -179,7 +190,7 @@ export function Workspace({ generation }: { generation: Generation }) {
    * document leaves the app just as a printed one does.
    */
   function requestExport(action: ExportAction) {
-    if (needsRevalidation || flagged.length > 0) {
+    if (reviewRequired) {
       rememberOverlayOpener()
       setGatedAction(action)
       setExportGateOpen(true)
@@ -189,9 +200,13 @@ export function Workspace({ generation }: { generation: Generation }) {
   }
 
   function exportAnyway() {
-    // Close the dialog before the browser takes its print snapshot. The print
-    // stylesheet also hides any dialog, in case it is still animating out.
-    flushSync(() => setExportGateOpen(false))
+    // Close the dialog and unlock the print stylesheet before the browser
+    // takes its print snapshot. The stylesheet also hides any dialog, in case
+    // it is still animating out.
+    flushSync(() => {
+      setExportGateOpen(false)
+      if (gatedAction === 'print') setPrintAcknowledgedRevision(generation.revision)
+    })
     runExport(gatedAction)
   }
 
@@ -202,7 +217,14 @@ export function Workspace({ generation }: { generation: Generation }) {
     <WorkspaceContext
       value={{ generation, evidenceNumbers, selectedEvidenceId, selectEvidence, revealClaim, isWriting }}
     >
-      <div className="ws-root space-y-6">
+      <div className="ws-root space-y-6" data-print-ready={printReady}>
+        {/* Paper only (see workspace.css): what a print started from the browser shows instead of the document. */}
+        {printReady ? null : (
+          <p className="ws-print-notice hidden">
+            Review the flagged statements in the app before printing. Use the Print / Save as PDF
+            button on the page to see them.
+          </p>
+        )}
         <div className="print:hidden">
           <PageHeader
             title="Your tailored draft"
@@ -223,7 +245,9 @@ export function Workspace({ generation }: { generation: Generation }) {
           />
         </div>
 
-        {generation.stale ? <StaleBanner reasons={generation.stale_reasons} /> : null}
+        {generation.stale ? (
+          <StaleBanner reasons={generation.stale_reasons} jobId={generation.job_id} />
+        ) : null}
 
         <div
           className={cn(

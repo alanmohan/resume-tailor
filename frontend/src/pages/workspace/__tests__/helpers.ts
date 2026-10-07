@@ -1,4 +1,4 @@
-import { configure, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { vi } from 'vitest'
 import type { Generation } from '@/lib/types'
 import { jsonResponse, mockApi, seedSession, sessionInfo, type Routes } from '@/test/mockApi'
@@ -7,14 +7,14 @@ import { claimElementId } from '../workspaceModel'
 import { makeGeneration } from './fixtures'
 
 /**
- * These tests render the whole app and wait for mocked network round trips.
- * On a busy machine (several test suites running at once) that can take many
- * times longer than usual, so the waiting limits are raised for the calling
- * test file. A correct run is not slowed down; only a failing wait takes longer.
+ * These tests render the whole app and wait for mocked network round trips,
+ * several per test. The shared setup already gives every wait 5 s and every
+ * test 20 s (src/test/setup.ts, vite.config.ts). The workspace files get a
+ * little more per test, because one test here makes many round trips and a
+ * busy machine can stretch each of them. A correct run is not slowed down.
  */
 export function allowForSlowMachine(): void {
   vi.setConfig({ testTimeout: 30_000 })
-  configure({ asyncUtilTimeout: 5_000 })
 }
 
 export function generationPath(generation: Generation): string {

@@ -1,5 +1,5 @@
-import { screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeBullet, makeConflict, makeProfile, makeRecord, sourceRef } from '@/test/fixtures'
 import {
   deferred,
@@ -12,6 +12,7 @@ import {
 } from '@/test/mockApi'
 import { renderApp } from '@/test/render'
 import type { Profile } from '@/lib/types'
+import { INDEX_STALL_MS } from './IndexStatus'
 
 const CONFIRM_LABEL = 'Confirm profile and build evidence index'
 
@@ -181,6 +182,94 @@ describe('ProfilePage records', () => {
     expect(document.querySelector('img')).toBeNull()
     expect(document.querySelector('[onerror]')).toBeNull()
     expect(document.querySelector('main b')).toBeNull()
+  })
+})
+
+describe('ProfilePage extraction notices', () => {
+  it('shows each notice as plain text near the top without blocking confirmation', async () => {
+    openProfile(
+      makeProfile({
+        notices: [
+          { code: 'no_contact', message: 'No name or contact details were found.' },
+          { code: 'uncaptured_lines', message: '2 lines of Resume were not captured: <b>Volunteer</b> tutor' },
+        ],
+      }),
+    )
+
+    const notices = (await screen.findByText('Notes from extraction')).closest('[role="status"]') as HTMLElement
+    expect(within(notices).getByText('No name or contact details were found.')).toBeInTheDocument()
+    // Markup inside a message is shown, never turned into elements.
+    expect(
+      within(notices).getByText('2 lines of Resume were not captured: <b>Volunteer</b> tutor'),
+    ).toBeInTheDocument()
+    expect(notices.querySelector('b')).toBeNull()
+    expect(screen.getByRole('button', { name: CONFIRM_LABEL })).toBeEnabled()
+  })
+
+  it('shows no notice box when the profile has none, or the field is missing', async () => {
+    openProfile(makeProfile())
+
+    await screen.findByRole('heading', { name: 'Review your profile' })
+    expect(screen.queryByText('Notes from extraction')).toBeNull()
+  })
+})
+
+describe('ProfilePage keyboard focus after removing', () => {
+  /** Activate a button the way a keyboard user does: focus it, then press Enter. */
+  async function pressEnterOn(user: ReturnType<typeof openProfile>['user'], button: HTMLElement) {
+    button.focus()
+    await user.keyboard('{Enter}')
+  }
+
+  it('moves to Undo after removing a stored record, and to its title after Undo', async () => {
+    const { user } = openProfile(makeProfile())
+    await screen.findByRole('heading', { name: 'Review your profile' })
+
+    await pressEnterOn(
+      user,
+      screen.getByRole('button', { name: 'Remove B.S. Computer Science at Lakeshore State University' }),
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toHaveFocus())
+
+    await pressEnterOn(user, screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(screen.getByLabelText('Degree or program')).toHaveFocus())
+  })
+
+  it('moves to the section\'s Add button after removing a record that was never saved', async () => {
+    const { user } = openProfile(makeProfile())
+    await screen.findByRole('heading', { name: 'Review your profile' })
+    await user.click(screen.getByRole('button', { name: 'Add project' }))
+
+    await pressEnterOn(user, screen.getByRole('button', { name: 'Remove New project' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add project' })).toHaveFocus())
+  })
+
+  it('moves to the next bullet, or to Add bullet after the last one', async () => {
+    const record = makeRecord({
+      bullets: [makeBullet(), makeBullet({ bullet_id: 'bul-2', text: 'Mentored two interns' })],
+    })
+    const { user } = openProfile(makeProfile({ records: [record] }))
+    await screen.findByRole('heading', { name: 'Review your profile' })
+    const role = 'Software Engineer at Northwind Robotics'
+
+    await pressEnterOn(user, screen.getByRole('button', { name: `Remove bullet 1 of ${role}` }))
+    await waitFor(() => expect(screen.getByLabelText(`Bullet 1 of ${role}`)).toHaveFocus())
+    expect(screen.getByLabelText(`Bullet 1 of ${role}`)).toHaveValue('Mentored two interns')
+
+    await pressEnterOn(user, screen.getByRole('button', { name: `Remove bullet 1 of ${role}` }))
+    await waitFor(() => expect(screen.getByRole('button', { name: `Add bullet to ${role}` })).toHaveFocus())
+  })
+
+  it('moves to the skill input after removing a skill', async () => {
+    const { user } = openProfile(makeProfile())
+    await screen.findByRole('heading', { name: 'Review your profile' })
+    const skills = within(screen.getByRole('region', { name: 'Skills' }))
+
+    await pressEnterOn(user, skills.getByRole('button', { name: 'Remove TypeScript' }))
+
+    await waitFor(() => expect(skills.getByLabelText('Skills in this group')).toHaveFocus())
+    expect(skills.queryByText('TypeScript')).toBeNull()
   })
 })
 
@@ -392,9 +481,7 @@ describe('ProfilePage confirmation', () => {
     expect(await screen.findByText('Building evidence records...')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Confirming...' })).toBeDisabled()
     // The page polls GET /api/profile and shows the server's own counts.
-    expect(
-      await screen.findByText('Embedding 3 of 7 evidence records', {}, { timeout: 4000 }),
-    ).toBeInTheDocument()
+    expect(await screen.findByText('Embedding 3 of 7 evidence records')).toBeInTheDocument()
     expect(screen.getByLabelText('Job title')).toBeDisabled()
 
     confirmResponse.resolve(jsonResponse(confirmed))
@@ -406,7 +493,7 @@ describe('ProfilePage confirmation', () => {
     expect(requests.find((r) => r.path === '/api/profile/confirm')!.body).toEqual({ expected_version: 1 })
     // Nothing was edited, so confirming did not send a PATCH first.
     expect(requests.some((request) => request.method === 'PATCH')).toBe(false)
-  }, 10_000)
+  })
 
   it('saves pending edits first and confirms the new version', async () => {
     const saved = makeProfile({ version: 2, records: [makeRecord({ title: 'Lead Engineer' })] })
@@ -464,6 +551,36 @@ describe('ProfilePage confirmation', () => {
     expect(within(alert).getByRole('button', { name: 'Retry confirmation' })).toBeEnabled()
   })
 
+  it('requires re-confirmation when the server dropped indexed_version but a draft already exists', async () => {
+    openProfile(makeProfile({ version: 3, status: 'draft', index_state: 'not_indexed', indexed_version: null }), {
+      'GET /api/generations': jsonResponse({
+        generations: [
+          {
+            generation_id: 'gen-1',
+            job_id: 'job-1',
+            job_title: 'Backend Engineer',
+            company: 'Acme Analytics',
+            status: 'completed',
+            stale: true,
+            created_at: '2026-10-01T12:00:00Z',
+          },
+        ],
+      }),
+    })
+
+    expect(await screen.findByText('Confirm again before generating')).toBeInTheDocument()
+    expect(screen.getByText(/You changed the profile after confirming it/)).toBeInTheDocument()
+    expect(screen.queryByText('Draft profile')).toBeNull()
+    expect(screen.getByRole('button', { name: CONFIRM_LABEL })).toBeEnabled()
+  })
+
+  it('calls a profile that was never confirmed a draft, not a changed one', async () => {
+    openProfile(makeProfile())
+
+    expect(await screen.findByText('Draft profile')).toBeInTheDocument()
+    expect(screen.queryByText('Confirm again before generating')).toBeNull()
+  })
+
   it('requires re-confirmation when the profile was edited after confirming', async () => {
     openProfile(
       makeProfile({ version: 3, status: 'draft', index_state: 'indexed', indexed_version: 2 }),
@@ -472,5 +589,62 @@ describe('ProfilePage confirmation', () => {
     expect(await screen.findByText('Confirm again before generating')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: CONFIRM_LABEL })).toBeEnabled()
     expect(screen.queryByRole('link', { name: 'Continue to target job' })).toBeNull()
+  })
+})
+
+describe('ProfilePage when indexing was interrupted', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('says indexing seems to have stopped once the count stands still, and resumes on confirm', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let embedded = 12
+    const stuck = () =>
+      makeProfile({ index_state: 'indexing', index_progress: { total: 40, embedded } })
+    const { user, requests } = openProfile(stuck(), {
+      'GET /api/profile': () => jsonResponse(stuck()),
+      'POST /api/profile/confirm': jsonResponse(
+        makeProfile({
+          status: 'confirmed',
+          index_state: 'indexed',
+          indexed_version: 1,
+          index_progress: { total: 40, embedded: 40 },
+        }),
+      ),
+    })
+
+    expect(await screen.findByText('Embedding 12 of 40 evidence records')).toBeInTheDocument()
+    expect(screen.getByText(/Indexing is running on the server/)).toBeInTheDocument()
+    // The profile can be confirmed again at any time, also before the hint appears.
+    expect(screen.getByRole('button', { name: CONFIRM_LABEL })).toBeEnabled()
+
+    // Progress restarts the wait: 15 s at 12, then the count moves to 13.
+    await act(() => vi.advanceTimersByTimeAsync(15_000))
+    embedded = 13
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
+    expect(screen.getByText('Embedding 13 of 40 evidence records')).toBeInTheDocument()
+    expect(screen.queryByText('Indexing seems to have stopped')).toBeNull()
+
+    await act(() => vi.advanceTimersByTimeAsync(INDEX_STALL_MS))
+    const stopped = screen.getByText('Indexing seems to have stopped').closest('[role="status"]') as HTMLElement
+    expect(stopped).toHaveTextContent('The count has stayed at 13 of 40 evidence records')
+    expect(stopped).toHaveTextContent('confirm the profile again to resume indexing')
+    expect(screen.queryByText(/Indexing is running on the server/)).toBeNull()
+    expect(screen.getByRole('button', { name: CONFIRM_LABEL })).toBeEnabled()
+
+    await user.click(within(stopped).getByRole('button', { name: 'Confirm again' }))
+
+    expect(await screen.findByText('Profile confirmed')).toBeInTheDocument()
+    expect(requests.find((request) => request.path === '/api/profile/confirm')!.body).toEqual({
+      expected_version: 1,
+    })
+  })
+
+  it('keeps Confirm usable for a profile whose indexing failed', async () => {
+    openProfile(makeProfile({ index_state: 'failed', index_error: 'Embedding stopped after 3 of 7 records.' }))
+
+    await screen.findByRole('alert')
+    expect(screen.getByRole('button', { name: CONFIRM_LABEL })).toBeEnabled()
   })
 })

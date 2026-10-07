@@ -3,7 +3,7 @@ import { FileX } from 'lucide-react'
 import { EmptyState } from '@/components/app'
 import type { Contact, CoverLetter, Resume, ResumeEntry } from '@/lib/types'
 import { ClaimItem } from './ClaimItem'
-import { contactDetails, entrySections } from './workspaceModel'
+import { contactDetails, entrySections, letterSignOff } from './workspaceModel'
 
 /**
  * The two documents of a draft, each on a paper-like surface.
@@ -82,6 +82,13 @@ function Entry({ entry, regenerable }: { entry: ResumeEntry; regenerable: boolea
           ))}
         </ul>
       ) : null}
+      {/* A role or project without statements; a degree or certificate normally has none. */}
+      {entry.bullets.length === 0 && regenerable ? (
+        <p className="mt-1 font-sans text-xs text-muted-foreground print:hidden">
+          No statement was generated for this record, so it prints as a heading only. To change
+          that, add detail to it (or remove it) on the Profile step and generate again.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -135,7 +142,7 @@ export function ResumeDocument({ resume }: { resume: Resume | null }) {
 
 interface CoverLetterDocumentProps {
   coverLetter: CoverLetter | null
-  /** The confirmed contact details, used as the letterhead. */
+  /** The confirmed contact details, used as the letterhead and for the sign-off. */
   contact: Contact | null
 }
 
@@ -149,6 +156,7 @@ export function CoverLetterDocument({ coverLetter, contact }: CoverLetterDocumen
       />
     )
   }
+  const signOff = letterSignOff(coverLetter, contact)
   return (
     <Paper>
       {contact ? <ContactHeader contact={contact} /> : null}
@@ -157,6 +165,16 @@ export function CoverLetterDocument({ coverLetter, contact }: CoverLetterDocumen
           <ClaimItem key={claim.item_id} claim={claim} />
         ))}
       </div>
+      {/* Added by the application from confirmed data: plain text, not a statement to validate or edit. */}
+      {signOff.length > 0 ? (
+        <div className="ws-letter-signoff mt-6">
+          {signOff.map((line) => (
+            <p key={line} className="wrap-anywhere">
+              {line}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </Paper>
   )
 }

@@ -52,6 +52,19 @@ test('a skill the profile does not contain is flagged after revalidation and gat
   await expect(claim).toBeFocused()
   expect(await printCalls(page)).toBe(0)
 
+  // The browser's own print command (Ctrl/Cmd+P, the browser menu) never
+  // opens that dialog. Until the statement is acknowledged, what it would put
+  // on paper is a short notice, not the document.
+  const printNotice = page.getByText('Review the flagged statements in the app before printing')
+  await expect(printNotice).toBeHidden()
+  await page.emulateMedia({ media: 'print' })
+  await expect(printNotice).toBeVisible()
+  await expect(resume).toBeHidden()
+  await expect(claim.locator('.ws-claim-text')).toBeHidden()
+  await expect(page.getByRole('tabpanel', { name: 'Cover letter' })).toBeHidden()
+  await page.emulateMedia({ media: 'screen' })
+  await expect(claim.locator('.ws-claim-text')).toBeVisible()
+
   // Copying is an export too and goes through the same review.
   await page.evaluate(() => navigator.clipboard.writeText('clipboard before the test'))
   await page.getByRole('button', { name: 'Copy', exact: true }).click()
@@ -67,6 +80,14 @@ test('a skill the profile does not contain is flagged after revalidation and gat
   await printAnyway.click()
   await expect(printGate).toBeHidden()
   await expect.poll(() => printCalls(page)).toBe(1)
+
+  // Acknowledged for this revision of the draft: now the document is what prints.
+  await page.emulateMedia({ media: 'print' })
+  await expect(printNotice).toBeHidden()
+  await expect(resume.getByRole('heading', { name: 'Jordan Rivera' })).toBeVisible()
+  await expect(claim.locator('.ws-claim-text')).toHaveText(KUBERNETES_EDIT)
+  await expect(claim.locator('.ws-claim-text')).toBeVisible()
+  await page.emulateMedia({ media: 'screen' })
 })
 
 test('the resume is copied, a statement regenerated and a coverage status corrected', async ({ page }) => {
@@ -125,7 +146,8 @@ test('editing the profile marks the existing draft as out of date', async ({ pag
   await page.getByRole('textbox', { name: 'Location' }).first().fill('Cleveland, OH')
   await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByText('All changes are saved.')).toBeVisible()
-  // The edit has to be confirmed again before anything new can be generated.
+  // The edit has to be confirmed again before anything new can be generated, and the page says so.
+  await expect(page.getByText('Confirm again before generating')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Confirm profile and build evidence index' })).toBeEnabled()
 
   await page.goto(`/workspace/${generationId}`)
@@ -135,6 +157,8 @@ test('editing the profile marks the existing draft as out of date', async ({ pag
   await expect(page.getByRole('tabpanel', { name: 'Resume' }).getByText('Columbus, OH')).toBeVisible()
 
   await stale.getByRole('link', { name: 'Generate a new draft' }).click()
+  // The link names the draft's own job, so a newer job can never be opened by mistake.
+  await expect(page).toHaveURL(/\/job\?job=[^&]+$/)
   await expect(heading(page, 'Review the job requirements')).toBeVisible()
   await expect(page.getByText('Your profile is not confirmed yet')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Generate tailored resume and cover letter' })).toBeDisabled()

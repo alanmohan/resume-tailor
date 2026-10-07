@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { DEMO_MODE_MESSAGE, FOOTER_DISCLAIMER } from '@/components/app'
 import { getSessionStatus } from '@/lib/session'
 import { makeProfile } from '@/test/fixtures'
-import { errorResponse, jsonResponse, mockApi, seedSession, sessionInfo } from '@/test/mockApi'
+import { TEST_LIMITS, errorResponse, jsonResponse, mockApi, seedSession, sessionInfo } from '@/test/mockApi'
 import { renderApp } from '@/test/render'
 
 describe('AppShell', () => {
@@ -103,6 +103,24 @@ describe('AppShell', () => {
 
     expect(await screen.findByRole('heading', { name: 'Your background' })).toBeInTheDocument()
     expect(getSessionStatus()).toBe('none')
+  })
+
+  it("states the server's session length on the expired screen", async () => {
+    seedSession()
+    mockApi({
+      'GET /readyz': jsonResponse({
+        status: 'ready',
+        checks: {},
+        provider_mode: 'openai',
+        limits: { ...TEST_LIMITS, session_ttl_hours: 72 },
+      }),
+      'GET /api/session': errorResponse(401, 'session_expired', 'Session expired'),
+      'GET /api/profile': errorResponse(401, 'session_expired', 'Session expired'),
+    })
+    renderApp('/profile')
+
+    await screen.findByRole('heading', { name: 'Your session has ended' })
+    expect(await screen.findByText(/Sessions last 72 hours/)).toBeInTheDocument()
   })
 
   it('moves keyboard focus to the new screen after navigating, but not on first load', async () => {

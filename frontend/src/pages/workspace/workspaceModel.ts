@@ -6,6 +6,7 @@
 import type {
   Claim,
   Contact,
+  CoverLetter,
   CoverageSummary,
   Generation,
   Resume,
@@ -43,17 +44,25 @@ export interface EntrySection {
 }
 
 /**
- * The resume's record-based sections in display order, without empty ones.
  * The projects section also carries publications and achievements, so its
- * title says so when a publication is present.
+ * title names every kind of record that is actually in it.
  */
+function projectsTitle(entries: ResumeEntry[]): string {
+  const hasPublication = entries.some((entry) => entry.category === 'publication')
+  const hasAward = entries.some((entry) => entry.category === 'achievement')
+  if (hasPublication && hasAward) return 'Projects, publications and awards'
+  if (hasPublication) return 'Projects and publications'
+  if (hasAward) return 'Projects and awards'
+  return 'Projects'
+}
+
+/** The resume's record-based sections in display order, without empty ones. */
 export function entrySections(resume: Resume): EntrySection[] {
-  const hasPublication = resume.projects.some((entry) => entry.category === 'publication')
   const sections: EntrySection[] = [
     { key: 'experience', title: 'Experience', entries: resume.experience, regenerable: true },
     {
       key: 'projects',
-      title: hasPublication ? 'Projects and publications' : 'Projects',
+      title: projectsTitle(resume.projects),
       entries: resume.projects,
       regenerable: true,
     },
@@ -122,6 +131,20 @@ export function isFlagged(claim: Claim): boolean {
   return FLAGGED_STATUSES.includes(claim.validation_status)
 }
 
+/**
+ * True while something in the draft still waits for the user's review, so it
+ * must not be printed or copied without an acknowledgement: edits that were
+ * not revalidated, or any statement that validation did not confirm.
+ */
+export function needsExportReview(generation: Generation): boolean {
+  const { validation } = generation
+  return (
+    validation.state === 'needs_revalidation' ||
+    validation.unsupported_count > 0 ||
+    listClaims(generation).some(({ claim }) => isFlagged(claim))
+  )
+}
+
 /** The DOM id of a claim's container, so other parts of the screen can scroll to and focus it. */
 export function claimElementId(itemId: string): string {
   return `claim-${itemId}`
@@ -153,6 +176,25 @@ export function numberEvidence(generation: Generation): Map<string, number> {
 export function evidenceTitle(numbers: ReadonlyMap<string, number>, evidenceId: string): string {
   const number = numbers.get(evidenceId)
   return number === undefined ? 'Evidence' : `Evidence ${number}`
+}
+
+// ------------------------------------------------------------- sign-off
+
+/** A closing the letter's last paragraph may already contain. */
+const SIGN_OFF_PATTERN = /\b(sincerely|regards|yours truly|yours faithfully)\b/i
+
+/**
+ * The closing lines the application adds under a cover letter: "Sincerely,"
+ * and the name from the confirmed contact details. The model is told not to
+ * write a signature, so the name never comes from generated text. Empty when
+ * no name is confirmed, the letter has no text, or its last paragraph already
+ * signs off.
+ */
+export function letterSignOff(coverLetter: CoverLetter, contact: Contact | null): string[] {
+  const name = contact?.name?.trim()
+  const lastParagraph = coverLetter.paragraphs.at(-1)
+  if (!name || !lastParagraph || SIGN_OFF_PATTERN.test(lastParagraph.text)) return []
+  return ['Sincerely,', name]
 }
 
 // ----------------------------------------------------------- plain text
@@ -193,6 +235,7 @@ export function documentPlainText(generation: Generation, kind: DocumentKind): s
   if (kind === 'resume' && resume) blocks.push(...resumeBlocks(resume))
   if (kind === 'cover_letter' && coverLetter) {
     blocks.push(...coverLetter.paragraphs.map((claim) => [claim.text]))
+    blocks.push(letterSignOff(coverLetter, resume?.contact ?? null))
   }
   return blocks
     .filter((lines) => lines.length > 0)

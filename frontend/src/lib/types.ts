@@ -35,15 +35,6 @@ export interface HealthStatus {
   status: 'ok'
 }
 
-/** Returned with 200 when ready and with 503 when not. */
-export interface ReadyStatus {
-  status: 'ready' | 'not_ready'
-  checks: Record<string, string>
-  provider_mode?: ProviderMode
-}
-
-// --------------------------------------------------------------- session
-
 export interface Limits {
   max_profile_chars: number
   max_job_chars: number
@@ -51,6 +42,17 @@ export interface Limits {
   max_requirements: number
   session_ttl_hours: number
 }
+
+/** Returned with 200 when ready and with 503 when not. */
+export interface ReadyStatus {
+  status: 'ready' | 'not_ready'
+  checks: Record<string, string>
+  provider_mode?: ProviderMode
+  /** The server's configured limits, readable before a session exists. Absent on older servers. */
+  limits?: Limits
+}
+
+// --------------------------------------------------------------- session
 
 export interface SessionCreated {
   token: string
@@ -173,6 +175,12 @@ export interface ProfileSource {
   revision: number
 }
 
+/** Something the extraction wants the user to know, e.g. source lines it could not capture. */
+export interface ProfileNotice {
+  code: string
+  message: string
+}
+
 export type ProfileStatus = 'draft' | 'confirmed'
 export type IndexState = 'not_indexed' | 'indexing' | 'indexed' | 'failed'
 
@@ -188,6 +196,8 @@ export interface Profile {
   records: ProfileRecord[]
   conflicts: Conflict[]
   sources: ProfileSource[]
+  /** Absent when there are none; read it as `profile.notices ?? []`. */
+  notices?: ProfileNotice[]
   review_summary: { needs_review_count: number; unresolved_conflict_count: number }
   created_at: IsoDateString
   updated_at: IsoDateString

@@ -6,7 +6,10 @@
 import {
   ACKNOWLEDGEMENT,
   DEMO_BANNER,
+  confirmProfile,
   expectNoHorizontalOverflow,
+  extractSampleProfile,
+  generateDraft,
   heading,
   screenshot,
 } from './support/steps.ts'
@@ -109,4 +112,40 @@ test('the workflow fits a 375px screen and the workspace uses tabs and a source 
   await expect(page.locator('html')).toHaveClass(/dark/)
   await expectNoHorizontalOverflow(page, 'Workspace, dark theme')
   await screenshot(page, 'mobile-9-workspace-dark')
+})
+
+/** 136 characters with no place to break a line, well inside every field's limit. */
+const UNBROKEN = 'Supercalifragilisticexpialidocious'.repeat(4)
+
+test('text without a break opportunity does not make a 375px screen scroll sideways', async ({ page }) => {
+  await extractSampleProfile(page)
+
+  // Profile: the row that stands in for a removed record repeats its title.
+  const title = page.getByRole('region', { name: 'Experience' }).getByRole('textbox', { name: 'Job title' }).first()
+  const originalTitle = await title.inputValue()
+  await title.fill(UNBROKEN)
+  await page.getByRole('button', { name: new RegExp(`^Remove ${UNBROKEN}`) }).tap()
+  await expect(page.getByText('will be removed when you save')).toBeVisible()
+  await expectNoHorizontalOverflow(page, 'Profile, removed record with a long title')
+  await screenshot(page, 'mobile-10-profile-long-removed-record')
+  // Undo puts the record back and continues in its title field.
+  const undo = page.getByRole('button', { name: 'Undo' })
+  await expect(undo).toBeFocused()
+  await undo.tap()
+  await expect(title).toBeFocused()
+  await title.fill(originalTitle)
+
+  // Workspace: the page header names the job title and the company.
+  await confirmProfile(page)
+  await page.getByRole('link', { name: 'Continue to target job' }).first().tap()
+  await page.getByRole('button', { name: 'Use sample job' }).tap()
+  await page.getByRole('textbox', { name: 'Role title (optional)' }).fill(UNBROKEN)
+  await page.getByRole('textbox', { name: 'Company (optional)' }).fill(UNBROKEN)
+  await page.getByRole('button', { name: 'Analyze job' }).tap()
+  await expect(heading(page, 'Review the job requirements')).toBeVisible()
+  await expectNoHorizontalOverflow(page, 'Job requirement review with a long title and company')
+  await generateDraft(page)
+  await expect(page.getByText(`Tailored for ${UNBROKEN} at ${UNBROKEN}.`)).toBeVisible()
+  await expectNoHorizontalOverflow(page, 'Workspace header with a long job title and company')
+  await screenshot(page, 'mobile-11-workspace-long-job-title')
 })

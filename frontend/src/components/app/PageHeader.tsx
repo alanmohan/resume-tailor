@@ -11,12 +11,15 @@ interface PageHeaderProps {
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div className="space-y-2">
+      <div className="min-w-0 space-y-2">
         <h1 className="font-serif text-3xl leading-tight font-medium tracking-tight text-balance sm:text-4xl">
           {title}
         </h1>
         {description ? (
-          <div className="max-w-prose text-base text-muted-foreground">{description}</div>
+          // wrap-anywhere: a long job title or company without spaces must not widen the page.
+          <div className="max-w-prose min-w-0 text-base text-muted-foreground wrap-anywhere">
+            {description}
+          </div>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}

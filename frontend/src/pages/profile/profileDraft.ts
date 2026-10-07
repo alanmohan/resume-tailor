@@ -63,6 +63,11 @@ export interface CategorySection {
   organizationLabel: string
 }
 
+/** The DOM id of a section's "Add ..." button, where focus goes when its unsaved record is removed. */
+export function addRecordButtonId(category: RecordCategory): string {
+  return `add-record-${category}`
+}
+
 /** Sections in display order. Skill records are groups: a label plus a list of skills. */
 export const CATEGORY_SECTIONS: CategorySection[] = [
   {

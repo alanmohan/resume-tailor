@@ -18,7 +18,7 @@ export function ProfileNotReadyAlert({ profile }: { profile: Profile }) {
       </AlertTitle>
       <AlertDescription>
         {indexing
-          ? 'You can analyze a job and review its requirements now. Generating a draft becomes available when indexing has finished; this page updates by itself.'
+          ? 'You can analyze a job and review its requirements now. Generating a draft becomes available when indexing has finished; this page updates by itself. If it does not finish, open your profile and confirm it again.'
           : 'Drafts are only generated from a confirmed, fully indexed profile. You can analyze a job and review its requirements now, but generating a draft stays disabled until you confirm your profile.'}
       </AlertDescription>
       {/* Outside AlertDescription, which styles every link inside it as underlined text. */}

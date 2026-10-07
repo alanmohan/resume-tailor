@@ -126,6 +126,45 @@ describe('Workspace documents', () => {
     expect(screen.queryByRole('tabpanel', { name: 'Resume' })).toBeNull()
   })
 
+  it('closes the cover letter with a sign-off made from the confirmed name, not a statement', async () => {
+    const { user } = openWorkspace()
+    await draftIsShown()
+    await user.click(screen.getByRole('tab', { name: 'Cover letter' }))
+
+    const signOff = document.querySelector('.ws-letter-signoff') as HTMLElement
+    expect(signOff).toHaveTextContent('Sincerely,Riley Example')
+    // Plain text under the paragraphs: nothing to edit, regenerate or validate.
+    expect(within(signOff).queryByRole('button')).toBeNull()
+    expect(signOff.closest('.ws-claim')).toBeNull()
+  })
+
+  it('leaves the sign-off out when no name is confirmed', async () => {
+    const generation = makeGeneration()
+    generation.resume!.contact.name = null
+    const { user } = openWorkspace(generation)
+    await draftIsShown()
+    await user.click(screen.getByRole('tab', { name: 'Cover letter' }))
+
+    expect(screen.getByText('Dear Hiring Manager,')).toBeInTheDocument()
+    expect(screen.queryByText('Sincerely,')).toBeNull()
+  })
+
+  it('explains a role without statements on screen, but not a degree, which normally has none', async () => {
+    const generation = makeGeneration()
+    generation.resume!.experience.push(
+      makeEntry({ entry_id: 'entry-empty', heading: 'Volunteer Web Developer', bullets: [] }),
+    )
+    openWorkspace(generation)
+    await draftIsShown()
+
+    const note = screen.getByText(/No statement was generated for this record/)
+    expect(note.closest('.ws-entry')).toHaveTextContent('Volunteer Web Developer')
+    // Screen only: the printed resume carries no explanation.
+    expect(note).toHaveClass('print:hidden')
+    const education = within(screen.getByRole('region', { name: 'Education' }))
+    expect(education.queryByText(/No statement was generated/)).toBeNull()
+  })
+
   it('shows every validation status as a text label next to an icon', async () => {
     openWorkspace(
       withClaim(makeGeneration(), 'p-1', { validation_status: 'unsupported', warnings: ['Not in evidence'] }),
@@ -575,6 +614,73 @@ describe('Workspace copy and print', () => {
     expect(print).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(printButton).toHaveFocus())
+  })
+
+  it('keeps the document off paper until the flagged statements are acknowledged', async () => {
+    stubPrint()
+    const { user } = openWorkspace()
+    await draftIsShown()
+    const root = document.querySelector('.ws-root') as HTMLElement
+    const notice = () => screen.queryByText(/Review the flagged statements in the app before printing/)
+
+    // What the browser's own print command (Ctrl/Cmd+P) would get: the notice.
+    expect(root).toHaveAttribute('data-print-ready', 'false')
+    expect(notice()).toHaveClass('ws-print-notice')
+
+    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before printing' }))
+    // Opening the dialog, or cancelling it, is not an acknowledgement.
+    expect(root).toHaveAttribute('data-print-ready', 'false')
+    await user.click(dialog.getByRole('checkbox', { name: /I have read these statements/ }))
+    await user.click(dialog.getByRole('button', { name: 'Print anyway' }))
+
+    expect(root).toHaveAttribute('data-print-ready', 'true')
+    expect(notice()).toBeNull()
+  })
+
+  it('asks again on paper when the draft changes after an acknowledgement', async () => {
+    stubPrint()
+    const generation = makeGeneration()
+    const { user } = openWorkspace(generation, {
+      [`PATCH ${DRAFT}`]: () => jsonResponse(afterEdit(generation, 'b-1', 'Built a search service')),
+    })
+    await draftIsShown()
+    const root = document.querySelector('.ws-root') as HTMLElement
+    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before printing' }))
+    await user.click(dialog.getByRole('checkbox', { name: /I have read these statements/ }))
+    await user.click(dialog.getByRole('button', { name: 'Print anyway' }))
+    expect(root).toHaveAttribute('data-print-ready', 'true')
+
+    await user.click(claim('b-1').getByRole('button', { name: 'Edit this statement' }))
+    await user.clear(claim('b-1').getByRole('textbox', { name: 'Edit statement' }))
+    await user.type(claim('b-1').getByRole('textbox', { name: 'Edit statement' }), 'Built a search service')
+    await user.click(claim('b-1').getByRole('button', { name: 'Save' }))
+
+    // A new revision: the earlier acknowledgement does not cover the edit.
+    await waitFor(() => expect(root).toHaveAttribute('data-print-ready', 'false'))
+  })
+
+  it('lets a draft with nothing to review print from the browser as well', async () => {
+    openWorkspace(withNothingFlagged(makeGeneration()))
+    await draftIsShown()
+
+    expect(document.querySelector('.ws-root')).toHaveAttribute('data-print-ready', 'true')
+    expect(screen.queryByText(/Review the flagged statements in the app before printing/)).toBeNull()
+  })
+
+  it('gates printing and copying when the server counts an unsupported statement', async () => {
+    const print = stubPrint()
+    const generation = withNothingFlagged(makeGeneration())
+    generation.validation = { ...generation.validation, unsupported_count: 1 }
+    const { user } = openWorkspace(generation)
+    await draftIsShown()
+
+    expect(document.querySelector('.ws-root')).toHaveAttribute('data-print-ready', 'false')
+    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Review before printing' })).toBeInTheDocument()
+    expect(print).not.toHaveBeenCalled()
   })
 
   it('goes to the statement from the review dialog without printing', async () => {

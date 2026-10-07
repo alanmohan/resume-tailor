@@ -23,11 +23,27 @@ export function useSessionStatus(): SessionStatus {
   return useSyncExternalStore(subscribeToSession, getSessionStatus)
 }
 
+/**
+ * The public readiness endpoint. It needs no session, so it is how the app
+ * learns the server's provider and limits before anything is submitted.
+ */
+function useReady() {
+  return useQuery({
+    queryKey: queryKeys.ready,
+    queryFn: getReady,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+}
+
 export interface SessionView {
   status: SessionStatus
   /** Server-side session details; undefined until loaded or when there is no session. */
   session: SessionInfo | undefined
-  /** The server's limits once known, otherwise the documented defaults. */
+  /**
+   * The server's limits: from the session when there is one, before that from
+   * the readiness endpoint, and the documented defaults only if neither has them.
+   */
   limits: Limits
   hasProfile: boolean
   /** ISO timestamp at which the session ends, or null without a session. */
@@ -43,11 +59,12 @@ export function useSession(): SessionView {
     queryFn: getSession,
     enabled: status === 'active',
   })
+  const ready = useReady()
   const session = status === 'active' ? query.data : undefined
   return {
     status,
     session,
-    limits: session?.limits ?? DEFAULT_LIMITS,
+    limits: session?.limits ?? ready.data?.limits ?? DEFAULT_LIMITS,
     hasProfile: session?.has_profile ?? false,
     expiresAt: status === 'active' ? (session?.expires_at ?? getSessionExpiry()) : null,
     isLoading: status === 'active' && query.isLoading,
@@ -61,12 +78,7 @@ export function useSession(): SessionView {
  */
 export function useProviderMode(): ProviderMode | null {
   const { session } = useSession()
-  const ready = useQuery({
-    queryKey: queryKeys.ready,
-    queryFn: getReady,
-    staleTime: 5 * 60_000,
-    retry: false,
-  })
+  const ready = useReady()
   return session?.provider_mode ?? ready.data?.provider_mode ?? null
 }
 

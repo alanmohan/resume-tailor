@@ -222,6 +222,58 @@ describe('StartPage', () => {
     expect(screen.getByRole('link', { name: 'Open my profile' })).toHaveAttribute('href', '/profile')
   })
 
+  it('asks for confirmation before extracting again replaces an existing profile', async () => {
+    seedSession()
+    const requests = mockApi({
+      'GET /api/session': jsonResponse(sessionInfo({ has_profile: true })),
+      'GET /api/profile': jsonResponse(makeProfile()),
+      'POST /api/profiles/ingest': jsonResponse(makeProfile({ version: 2 })),
+    })
+    const ingests = () => requests.filter((request) => request.path === '/api/profiles/ingest')
+    const { user } = renderApp('/')
+    await screen.findByText('Continue where you left off')
+    await fillAndAcknowledge(user, 'Software Engineer at Northwind Robotics')
+    const extract = screen.getByRole('button', { name: 'Extract my profile' })
+
+    await user.click(extract)
+
+    const dialog = within(await screen.findByRole('alertdialog', { name: 'Replace your profile?' }))
+    expect(dialog.getByText(/every edit and conflict decision, is replaced/)).toBeInTheDocument()
+    expect(dialog.getByText(/marked as out of date/)).toBeInTheDocument()
+    expect(ingests()).toHaveLength(0)
+
+    // Keeping the profile sends nothing, keeps the pasted text and returns to the button.
+    await user.click(dialog.getByRole('button', { name: 'Keep my profile' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(ingests()).toHaveLength(0)
+    expect(resumeBox()).toHaveValue('Software Engineer at Northwind Robotics')
+    await waitFor(() => expect(extract).toHaveFocus())
+
+    await user.click(extract)
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Replace my profile' }),
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Review your profile' })).toBeInTheDocument()
+    expect(ingests()).toHaveLength(1)
+  })
+
+  it("shows the server's own limits and retention before a session exists", async () => {
+    mockApi({
+      'GET /readyz': jsonResponse({
+        status: 'ready',
+        checks: {},
+        provider_mode: 'openai',
+        limits: { ...TEST_LIMITS, max_profile_chars: 100_000, session_ttl_hours: 72 },
+      }),
+    })
+    renderApp('/')
+
+    expect(await screen.findByText('0 / 100,000 characters in total')).toBeInTheDocument()
+    expect(screen.getByText(/for at most 72 hours/)).toBeInTheDocument()
+    expect(getToken()).toBeNull()
+  })
+
   it('says so in the privacy notice when the server runs in demo mode', async () => {
     mockApi({
       'GET /readyz': jsonResponse({ status: 'ready', checks: {}, provider_mode: 'fake' }),

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { History, Sparkles } from 'lucide-react'
@@ -16,6 +16,7 @@ import { useProfile, useProviderMode, useSession } from '@/lib/hooks'
 import { queryKeys } from '@/lib/queryKeys'
 import { ensureSession } from '@/lib/session'
 import { PrivacyNotice } from './PrivacyNotice'
+import { ReplaceProfileDialog } from './ReplaceProfileDialog'
 import { SourceField } from './SourceField'
 import {
   SOURCE_SLOTS,
@@ -46,6 +47,9 @@ export default function StartPage() {
   const navigate = useNavigate()
   const [stage, setStage] = useState<Stage>('idle')
   const [sampleLoaded, setSampleLoaded] = useState(false)
+  /** A valid submission that waits for the user to agree to replace the existing profile. */
+  const [pendingReplacement, setPendingReplacement] = useState<IngestPayload | null>(null)
+  const submitButton = useRef<HTMLButtonElement>(null)
 
   const resolver = useMemo(
     () => zodResolver(buildStartSchema(limits.max_profile_chars)),
@@ -81,15 +85,25 @@ export default function StartPage() {
     onSettled: () => setStage('idle'),
   })
 
-  const submit = form.handleSubmit((values) => ingest.mutate(toIngestPayload(values)))
+  const hasExistingProfile = status === 'active' && (hasProfile || !!existingProfile)
+
+  const submit = form.handleSubmit((values) => {
+    const payload = toIngestPayload(values)
+    // Extracting again replaces the reviewed profile: a destructive action, so ask first.
+    if (hasExistingProfile) setPendingReplacement(payload)
+    else ingest.mutate(payload)
+  })
+
+  function replaceProfile() {
+    if (pendingReplacement) ingest.mutate(pendingReplacement)
+    setPendingReplacement(null)
+  }
 
   function fillSample() {
     form.setValue('sources', sampleSources(), { shouldDirty: true })
     form.clearErrors('sources')
     setSampleLoaded(true)
   }
-
-  const hasExistingProfile = status === 'active' && (hasProfile || !!existingProfile)
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -110,7 +124,7 @@ export default function StartPage() {
           <AlertTitle>Continue where you left off</AlertTitle>
           <AlertDescription>
             This tab already has a profile. Extracting again below replaces it and marks earlier
-            drafts as out of date.
+            drafts as out of date; you are asked to confirm before that happens.
           </AlertDescription>
           {/* Outside AlertDescription, which styles every link inside it as underlined text. */}
           <div className="col-start-2 mt-2">
@@ -198,11 +212,22 @@ export default function StartPage() {
             <LoadingBlock label={STAGE_LABELS[stage]} lines={2} />
           ) : null}
 
-          <Button type="submit" size="lg" disabled={ingest.isPending}>
+          <Button ref={submitButton} type="submit" size="lg" disabled={ingest.isPending}>
             {ingest.isPending ? 'Working...' : 'Extract my profile'}
           </Button>
         </form>
       </FormProvider>
+
+      <ReplaceProfileDialog
+        open={pendingReplacement !== null}
+        onCancel={() => setPendingReplacement(null)}
+        onConfirm={replaceProfile}
+        // The dialog is opened from code, so Radix has no trigger to return focus to.
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          submitButton.current?.focus()
+        }}
+      />
     </div>
   )
 }

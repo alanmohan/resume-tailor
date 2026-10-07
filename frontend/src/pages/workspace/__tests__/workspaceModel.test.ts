@@ -9,12 +9,14 @@ import {
   formatDateTime,
   isFlagged,
   jobLabel,
+  letterSignOff,
   listClaims,
+  needsExportReview,
   numberEvidence,
   sectionLabel,
   staleExplanation,
 } from '../workspaceModel'
-import { makeClaim, makeEntry, makeGeneration } from './fixtures'
+import { makeClaim, makeEntry, makeGeneration, withClaim, withNothingFlagged } from './fixtures'
 
 describe('entrySections', () => {
   it('keeps the display order and leaves out empty sections', () => {
@@ -28,6 +30,20 @@ describe('entrySections', () => {
     resume.projects.push(makeEntry({ entry_id: 'entry-9', category: 'publication', heading: 'A Paper' }))
 
     expect(entrySections(resume).map((section) => section.title)).toContain('Projects and publications')
+  })
+
+  it('names awards in the projects section title when it holds an achievement', () => {
+    const titleWith = (...categories: string[]) => {
+      const resume = makeGeneration().resume!
+      categories.forEach((category, index) =>
+        resume.projects.push(makeEntry({ entry_id: `entry-extra-${index}`, category })),
+      )
+      return entrySections(resume).find((section) => section.key === 'projects')!.title
+    }
+
+    expect(titleWith()).toBe('Projects')
+    expect(titleWith('achievement')).toBe('Projects and awards')
+    expect(titleWith('publication', 'achievement')).toBe('Projects, publications and awards')
   })
 
   it('marks only experience and projects as sections the server can regenerate', () => {
@@ -147,7 +163,7 @@ describe('documentPlainText', () => {
     )
   })
 
-  it('writes the cover letter as the letterhead and its paragraphs', () => {
+  it('writes the cover letter as the letterhead, its paragraphs and the sign-off', () => {
     expect(documentPlainText(makeGeneration(), 'cover_letter')).toBe(
       [
         'Riley Example',
@@ -156,12 +172,70 @@ describe('documentPlainText', () => {
         'Dear Hiring Manager,',
         '',
         'At Northwind Robotics I built a Python search service for the support team.',
+        '',
+        'Sincerely,',
+        'Riley Example',
       ].join('\n'),
     )
   })
 
+  it('titles the copied projects section after the kinds of record in it', () => {
+    const generation = makeGeneration()
+    generation.resume!.projects.push(
+      makeEntry({ entry_id: 'entry-9', category: 'achievement', heading: 'Hack Night, second place' }),
+    )
+
+    expect(documentPlainText(generation, 'resume')).toContain('PROJECTS AND AWARDS\n')
+  })
+
   it('returns an empty string when the document was not generated', () => {
     expect(documentPlainText(makeGeneration({ resume: null, cover_letter: null }), 'resume')).toBe('')
+  })
+})
+
+describe('letterSignOff', () => {
+  const letter = makeGeneration().cover_letter!
+  const contact = makeGeneration().resume!.contact
+
+  it('closes the letter with "Sincerely," and the confirmed name', () => {
+    expect(letterSignOff(letter, contact)).toEqual(['Sincerely,', 'Riley Example'])
+  })
+
+  it('adds nothing without a confirmed name', () => {
+    expect(letterSignOff(letter, { ...contact, name: null })).toEqual([])
+    expect(letterSignOff(letter, { ...contact, name: '   ' })).toEqual([])
+    expect(letterSignOff(letter, null)).toEqual([])
+  })
+
+  it('adds nothing when the last paragraph already signs off, or the letter is empty', () => {
+    const signed = { paragraphs: [...letter.paragraphs, makeClaim({ item_id: 'cl-9', text: 'Best regards, Riley' })] }
+
+    expect(letterSignOff(signed, contact)).toEqual([])
+    expect(letterSignOff({ paragraphs: [] }, contact)).toEqual([])
+  })
+})
+
+describe('needsExportReview', () => {
+  const clean = () => withNothingFlagged(makeGeneration())
+
+  it('is false for a validated draft with no flagged statement', () => {
+    expect(needsExportReview(clean())).toBe(false)
+  })
+
+  it('is true for a flagged statement of any kind', () => {
+    for (const status of ['needs_review', 'unsupported', 'user_edited'] as const) {
+      expect(needsExportReview(withClaim(clean(), 'sum-1', { validation_status: status }))).toBe(true)
+    }
+  })
+
+  it('is true while edits wait for revalidation or the server counts an unsupported statement', () => {
+    const edited = clean()
+    edited.validation.state = 'needs_revalidation'
+    const unsupported = clean()
+    unsupported.validation.unsupported_count = 1
+
+    expect(needsExportReview(edited)).toBe(true)
+    expect(needsExportReview(unsupported)).toBe(true)
   })
 })
 

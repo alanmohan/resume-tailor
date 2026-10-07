@@ -3,6 +3,7 @@ import { TriangleAlert } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import type { StaleReason } from '@/lib/types'
+import { jobPath } from '@/pages/job/jobRoutes'
 import { staleExplanation } from './workspaceModel'
 
 /**
@@ -10,7 +11,7 @@ import { staleExplanation } from './workspaceModel'
  * changed. The draft stays readable, copyable and printable; a current one
  * has to be generated again from the Target job step.
  */
-export function StaleBanner({ reasons }: { reasons: StaleReason[] }) {
+export function StaleBanner({ reasons, jobId }: { reasons: StaleReason[]; jobId: string }) {
   return (
     <Alert role="status" className="border-warning/40 print:hidden">
       <TriangleAlert aria-hidden="true" className="text-warning" />
@@ -22,7 +23,8 @@ export function StaleBanner({ reasons }: { reasons: StaleReason[] }) {
       {/* Outside AlertDescription, which styles every link inside it as underlined text. */}
       <div className="col-start-2 mt-2">
         <Button asChild size="sm">
-          <Link to="/job">Generate a new draft</Link>
+          {/* The draft's own job, not the bare "/job", which opens the newest job. */}
+          <Link to={jobPath(jobId)}>Generate a new draft</Link>
         </Button>
       </div>
     </Alert>

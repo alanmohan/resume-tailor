@@ -80,7 +80,11 @@ describe('WorkspacePage while the draft is generated', () => {
 
     expect(await screen.findByText('Generating...')).toBeInTheDocument()
     expect(screen.getByText(/Backend Engineer at Acme Analytics/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Back to target job' })).toHaveAttribute('href', '/job')
+    // Back to the job this draft is for, not to whichever job is newest.
+    expect(screen.getByRole('link', { name: 'Back to target job' })).toHaveAttribute(
+      'href',
+      '/job?job=job-1',
+    )
     expect(screen.queryByRole('tab')).toBeNull()
     expect(draftReads()).toHaveLength(1)
 
@@ -115,7 +119,7 @@ describe('WorkspacePage for a failed or stale draft', () => {
     expect(alert).toHaveTextContent('The AI provider took too long to answer.')
     expect(within(alert).getByRole('link', { name: 'Back to target job' })).toHaveAttribute(
       'href',
-      '/job',
+      '/job?job=job-1',
     )
     expect(screen.queryByRole('tab')).toBeNull()
   })
@@ -127,9 +131,10 @@ describe('WorkspacePage for a failed or stale draft', () => {
     const banner = screen.getByText('This draft is out of date').closest('[role="status"]') as HTMLElement
     expect(banner).toHaveTextContent('Your profile changed after this draft was generated.')
     expect(banner).toHaveTextContent('You can still read, copy and print it')
+    // The draft's own job: with several jobs, the bare /job would open the newest one.
     expect(within(banner).getByRole('link', { name: 'Generate a new draft' })).toHaveAttribute(
       'href',
-      '/job',
+      '/job?job=job-1',
     )
     expect(screen.getByRole('heading', { name: 'Riley Example' })).toBeInTheDocument()
   })

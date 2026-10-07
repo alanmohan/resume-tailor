@@ -7,17 +7,19 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { isApiError } from '@/lib/errors'
 import { useSessionStatus } from '@/lib/hooks'
 import type { Generation } from '@/lib/types'
+import { jobPath } from '@/pages/job/jobRoutes'
 import { useGeneration } from './generationData'
 import { Workspace } from './Workspace'
 import { jobLabel } from './workspaceModel'
 
 const PAGE_TITLE = 'Your tailored draft'
 
-function BackToJobLink({ label }: { label: string }) {
+/** `to` is the draft's own job when one is known; the bare "/job" opens the newest job. */
+function BackToJobLink({ label, to = '/job' }: { label: string; to?: string }) {
   return (
     // text-foreground: inside the red failure alert the link should still look like a normal button.
     <Button asChild variant="outline" className="text-foreground">
-      <Link to="/job">{label}</Link>
+      <Link to={to}>{label}</Link>
     </Button>
   )
 }
@@ -66,7 +68,7 @@ function GenerationRunning({ generation }: { generation: Generation }) {
           statement. This can take a minute or two; the page updates by itself.
         </p>
       </div>
-      <BackToJobLink label="Back to target job" />
+      <BackToJobLink label="Back to target job" to={jobPath(generation.job_id)} />
     </div>
   )
 }
@@ -87,7 +89,7 @@ function GenerationFailed({ generation }: { generation: Generation }) {
         </AlertDescription>
         {/* Outside AlertDescription, which styles every link inside it as underlined text. */}
         <div className="col-start-2 mt-2">
-          <BackToJobLink label="Back to target job" />
+          <BackToJobLink label="Back to target job" to={jobPath(generation.job_id)} />
         </div>
       </Alert>
     </div>
