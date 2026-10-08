@@ -1,10 +1,12 @@
 /*
  * Print layout for the Workspace screen.
  *
- * Printing (or "Save as PDF") outputs exactly one thing: the active document,
- * as one column of black text on white paper. Everything used to review it
- * stays on screen. While statements still wait for the user's review, paper
- * gets a one-line notice instead of the document (see "review gate" below).
+ * The app's own export is the Download PDF button (pdfDocument.ts). These
+ * rules are for a user who prints with the browser instead (Ctrl/Cmd+P):
+ * that outputs exactly one thing, the active document, as one column of black
+ * text on white paper. Everything used to review it stays on screen. While
+ * statements still wait for the user's review, paper gets a one-line notice
+ * instead of the document (see "review gate" below).
  *
  * How the pieces fit together:
  *   - Review controls carry Tailwind's `print:hidden` in the components.
@@ -109,9 +111,9 @@
   /* ------------------------------------------------------ review gate */
 
   /* The browser's own print command (Ctrl/Cmd+P, the browser menu) does not
-     go through the Print button and its review dialog. Workspace.tsx sets
-     data-print-ready="false" while flagged statements have not been
-     acknowledged for this revision of the draft; then no document prints,
+     go through the Download PDF button and its review dialog. Workspace.tsx
+     sets data-print-ready="false" while flagged statements have not been
+     acknowledged there for this revision of the draft; then no document prints,
      only the notice. !important because it has to beat the rule above. */
   .ws-root[data-print-ready='false'] .ws-document-panel {
     display: none !important;

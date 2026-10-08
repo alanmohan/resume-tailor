@@ -4,28 +4,32 @@ import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { newIdempotencyKey } from '@/lib/api'
 import { queryKeys } from '@/lib/queryKeys'
-import type { Job } from '@/lib/types'
 import { generateDraft, isProfileNotReady } from './generateDraft'
 import { workspacePath } from './jobRoutes'
 
 /** 'generating': the request is running. 'waiting': checking on a generation that is already running. */
-export type GenerationPhase = 'generating' | 'waiting'
+type GenerationPhase = 'generating' | 'waiting'
 
-/** The idempotency key of the current attempt and the job version it was made for. */
+/** The idempotency key of the current attempt and the job it was made for. */
 interface Attempt {
   idempotencyKey: string
-  jobVersion: number
+  jobId: string
+}
+
+interface GenerationRequest extends Attempt {
+  signal: AbortSignal
 }
 
 /**
- * "Generate tailored resume and cover letter" for one job.
+ * Writes the resume and cover letter for a job and opens the workspace.
  *
- * Every attempt has one idempotency key. Pressing Retry after a failure sends
- * the same key again, so the server returns the stored draft (or resumes the
- * failed one) instead of charging for a second generation. A new key is only
- * made when the job itself has changed since the last attempt.
+ * Every attempt has one idempotency key. Starting again for the same job
+ * after a failure (Retry) sends the same key, so the server returns the
+ * stored draft (or resumes the failed one) instead of charging for a second
+ * generation. A new key is only made for a different job, or when the Target
+ * job screen is opened again.
  */
-export function useGenerateDraft(job: Job) {
+export function useGenerateDraft() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [attempt, setAttempt] = useState<Attempt | null>(null)
@@ -36,8 +40,8 @@ export function useGenerateDraft(job: Job) {
   useEffect(() => () => abortRef.current?.abort(), [])
 
   const mutation = useMutation({
-    mutationFn: ({ idempotencyKey, signal }: { idempotencyKey: string; signal: AbortSignal }) =>
-      generateDraft(job.job_id, idempotencyKey, { signal, onWaiting: () => setPhase('waiting') }),
+    mutationFn: ({ jobId, idempotencyKey, signal }: GenerationRequest) =>
+      generateDraft(jobId, idempotencyKey, { signal, onWaiting: () => setPhase('waiting') }),
     onSuccess: (generation) => {
       // The workspace opens with this draft already loaded.
       queryClient.setQueryData(queryKeys.generation(generation.generation_id), generation)
@@ -52,16 +56,15 @@ export function useGenerateDraft(job: Job) {
     },
   })
 
-  function start() {
-    const idempotencyKey =
-      attempt?.jobVersion === job.version ? attempt.idempotencyKey : newIdempotencyKey()
-    setAttempt({ idempotencyKey, jobVersion: job.version })
+  function start(jobId: string) {
+    const idempotencyKey = attempt?.jobId === jobId ? attempt.idempotencyKey : newIdempotencyKey()
+    setAttempt({ idempotencyKey, jobId })
     setPhase('generating')
 
     const controller = new AbortController()
     abortRef.current = controller
     mutation.mutate(
-      { idempotencyKey, signal: controller.signal },
+      { jobId, idempotencyKey, signal: controller.signal },
       {
         // Runs only while this screen is still open.
         onSuccess: (generation) => {
@@ -74,10 +77,13 @@ export function useGenerateDraft(job: Job) {
 
   return {
     start,
-    /** Forget the last failure, e.g. after the job was saved again. */
-    reset: mutation.reset,
+    /** The job of the current attempt, so a screen can tell whether this state is about its job. */
+    jobId: attempt?.jobId ?? null,
     isPending: mutation.isPending,
+    isSuccess: mutation.isSuccess,
     phase,
     error: mutation.error,
   }
 }
+
+export type DraftGeneration = ReturnType<typeof useGenerateDraft>

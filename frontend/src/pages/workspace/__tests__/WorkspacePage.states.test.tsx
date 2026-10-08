@@ -130,7 +130,7 @@ describe('WorkspacePage for a failed or stale draft', () => {
 
     const banner = screen.getByText('This draft is out of date').closest('[role="status"]') as HTMLElement
     expect(banner).toHaveTextContent('Your profile changed after this draft was generated.')
-    expect(banner).toHaveTextContent('You can still read, copy and print it')
+    expect(banner).toHaveTextContent('You can still read, copy and download it')
     // The draft's own job: with several jobs, the bare /job would open the newest one.
     expect(within(banner).getByRole('link', { name: 'Generate a new draft' })).toHaveAttribute(
       'href',

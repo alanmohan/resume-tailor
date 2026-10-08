@@ -9,11 +9,12 @@ import {
   jsonResponse,
   mockApi,
   sessionInfo,
+  type RecordedRequest,
 } from '@/test/mockApi'
-import { JOB_DESCRIPTION, makeJob, makeRequirement, sourceSpan } from './jobFixtures'
+import { JOB_DESCRIPTION, makeGeneration, makeGenerationSummary, makeJob } from './jobFixtures'
 import { openJobPage, renderJobPage } from './renderJob'
 
-const GENERATE_LABEL = 'Generate tailored resume and cover letter'
+const SUBMIT_LABEL = 'Tailor my resume'
 
 function descriptionBox() {
   return screen.getByLabelText('Job description') as HTMLTextAreaElement
@@ -23,6 +24,18 @@ function descriptionBox() {
 async function pasteDescription(user: ReturnType<typeof renderJobPage>['user'], text: string) {
   await user.click(descriptionBox())
   await user.paste(text)
+}
+
+function posts(requests: RecordedRequest[], path: string) {
+  return requests.filter((request) => request.method === 'POST' && request.path === path)
+}
+
+/** The text of each step in the progress list, e.g. "1. Analyzing the job description In progress". */
+function progressSteps(): string[] {
+  const progress = screen.getByRole('status', { name: 'Progress' })
+  return within(progress)
+    .queryAllByRole('listitem')
+    .map((item) => [...item.querySelectorAll('span')].map((span) => span.textContent?.trim()).join(' '))
 }
 
 describe('JobPage guards', () => {
@@ -62,15 +75,8 @@ describe('JobPage guards', () => {
     expect(await screen.findByRole('heading', { name: 'Target job' })).toBeInTheDocument()
   })
 
-  it('explains that an unconfirmed profile blocks generation but not job analysis', async () => {
-    const job = makeJob()
-    const { user } = openJobPage({
-      profile: makeProfile({ status: 'draft' }),
-      routes: {
-        'POST /api/jobs': jsonResponse(job, 201),
-        'GET /api/jobs/job-1': jsonResponse(job),
-      },
-    })
+  it('explains an unconfirmed profile and does not offer to tailor', async () => {
+    const { requests, user } = openJobPage({ profile: makeProfile({ status: 'draft' }) })
 
     expect(await screen.findByText('Your profile is not confirmed yet')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Review and confirm profile' })).toHaveAttribute(
@@ -78,20 +84,25 @@ describe('JobPage guards', () => {
       '/profile',
     )
 
-    // Job analysis still works.
-    await pasteDescription(user, JOB_DESCRIPTION)
-    await user.click(screen.getByRole('button', { name: 'Analyze job' }))
-    expect(
-      await screen.findByRole('heading', { name: 'Review the job requirements' }),
-    ).toBeInTheDocument()
-
-    // Generation is disabled, and the reason is written next to the button.
-    const generate = screen.getByRole('button', { name: GENERATE_LABEL })
-    expect(generate).toBeDisabled()
-    expect(generate).toHaveAccessibleDescription(
-      /Generating is unavailable until your profile is confirmed/,
+    // The job would be analyzed for nothing, so the whole run is unavailable.
+    const submit = screen.getByRole('button', { name: SUBMIT_LABEL })
+    expect(submit).toBeDisabled()
+    expect(submit).toHaveAccessibleDescription(
+      'Tailoring is unavailable until your profile is confirmed and indexed.',
     )
-    expect(screen.getByRole('link', { name: 'Open profile' })).toHaveAttribute('href', '/profile')
+    // Not even with Enter, which submits a form whatever its button says.
+    await pasteDescription(user, JOB_DESCRIPTION)
+    await user.type(screen.getByLabelText('Company (optional)'), 'Fernhollow AI{Enter}')
+    expect(requests.some((request) => request.method === 'POST')).toBe(false)
+  })
+
+  it('says so while the profile is still being indexed', async () => {
+    openJobPage({
+      profile: makeProfile({ status: 'confirmed', index_state: 'indexing', indexed_version: null }),
+    })
+
+    expect(await screen.findByText('Your profile is still being indexed')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: SUBMIT_LABEL })).toBeDisabled()
   })
 })
 
@@ -124,7 +135,7 @@ describe('JobPage form', () => {
   it('asks for a description when the form is submitted empty', async () => {
     const { requests, user } = openJobPage()
 
-    await user.click(await screen.findByRole('button', { name: 'Analyze job' }))
+    await user.click(await screen.findByRole('button', { name: SUBMIT_LABEL }))
 
     expect(
       await screen.findByText('Paste the job description so its requirements can be extracted.'),
@@ -146,7 +157,7 @@ describe('JobPage form', () => {
     await pasteDescription(user, 'This sentence is longer than twenty characters.')
     expect(screen.getByText('47 / 20 characters')).toBeInTheDocument()
     expect(screen.getByText('(27 over the limit)')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Analyze job' }))
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }))
 
     expect(
       await screen.findByText(/The job description is longer than the 20 character limit/),
@@ -160,7 +171,7 @@ describe('JobPage form', () => {
     await user.click(await screen.findByLabelText('Role title (optional)'))
     await user.paste('x'.repeat(201))
     await pasteDescription(user, JOB_DESCRIPTION)
-    await user.click(screen.getByRole('button', { name: 'Analyze job' }))
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }))
 
     expect(
       await screen.findByText('Keep the role title to 200 characters or fewer.'),
@@ -179,61 +190,65 @@ describe('JobPage form', () => {
     expect(screen.getByText(/Fictional sample job loaded/)).toBeInTheDocument()
   })
 
-  it('analyzes the job and lists its requirements grouped by importance', async () => {
+  it('analyzes the job, writes the draft and opens the workspace in one run', async () => {
     const job = makeJob()
-    const response = deferred<Response>()
+    const analysis = deferred<Response>()
+    const generation = deferred<Response>()
     const { requests, user } = openJobPage({
       routes: {
-        'POST /api/jobs': () => response.promise,
+        'POST /api/jobs': () => analysis.promise,
         'GET /api/jobs/job-1': jsonResponse(job),
+        'POST /api/generations': () => generation.promise,
       },
     })
 
     await user.type(await screen.findByLabelText('Role title (optional)'), '  ML Engineer ')
     await pasteDescription(user, JOB_DESCRIPTION)
-    await user.click(screen.getByRole('button', { name: 'Analyze job' }))
+    expect(progressSteps()).toEqual([])
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }))
 
-    // While the request runs: an honest label and no second submission.
-    expect(await screen.findByText('Analyzing job description...')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Analyzing...' })).toBeDisabled()
+    // Step 1 runs: honest step statuses, and nothing can be submitted twice.
+    await waitFor(() =>
+      expect(progressSteps()).toEqual([
+        '1. Analyzing the job description In progress',
+        '2. Writing your resume and cover letter Waiting',
+      ]),
+    )
+    expect(screen.getByRole('status', { name: 'Progress' })).toHaveTextContent(
+      'This usually takes about a minute.',
+    )
+    expect(screen.getByRole('button', { name: 'Tailoring...' })).toBeDisabled()
     expect(descriptionBox()).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use sample job' })).toBeDisabled()
+    expect(posts(requests, '/api/generations')).toHaveLength(0)
 
-    response.resolve(jsonResponse(job, 201))
-    expect(
-      await screen.findByRole('heading', { name: 'Review the job requirements' }),
-    ).toBeInTheDocument()
+    // Step 2 starts by itself once the job is stored.
+    analysis.resolve(jsonResponse(job, 201))
+    expect(await screen.findByRole('heading', { name: 'Your target job' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(progressSteps()).toEqual([
+        '1. Analyzing the job description Done',
+        '2. Writing your resume and cover letter In progress',
+      ]),
+    )
+    expect(screen.getByRole('button', { name: 'Generating...' })).toBeDisabled()
 
-    const posts = requests.filter((request) => request.method === 'POST')
-    expect(posts).toHaveLength(1)
-    expect(posts[0].path).toBe('/api/jobs')
+    generation.resolve(jsonResponse(makeGeneration({ generation_id: 'gen-42' }), 201))
+    expect(await screen.findByRole('heading', { name: 'Workspace gen-42' })).toBeInTheDocument()
+
+    const sent = requests.filter((request) => request.method === 'POST')
+    expect(sent.map((request) => request.path)).toEqual(['/api/jobs', '/api/generations'])
     // The description is sent untouched; blank optional fields are sent as null.
-    expect(posts[0].body).toEqual({
+    expect(sent[0].body).toEqual({
       description: JOB_DESCRIPTION,
       title: 'ML Engineer',
       company: null,
     })
-
-    const required = within(screen.getByRole('region', { name: 'Required (2)' }))
-    expect(required.getByLabelText('Requirement 1 text')).toHaveValue('Strong Python skills')
-    expect(required.getByLabelText('Requirement 2 text')).toHaveValue('Experience with Docker')
-    expect(required.queryByText('Inferred')).toBeNull()
-
-    const preferred = within(screen.getByRole('region', { name: 'Preferred (2)' }))
-    expect(preferred.getByLabelText('Requirement 3 text')).toHaveValue('Experience with AWS')
-    expect(preferred.getByLabelText('Requirement 4 text')).toHaveValue(
-      'Comfortable working with support teams',
-    )
-    // Only the requirement that is not stated in the posting is marked.
-    const inferredRow = within(preferred.getByRole('group', { name: 'Requirement 4' }))
-    expect(inferredRow.getByRole('button', { name: 'Inferred' })).toBeInTheDocument()
-    expect(preferred.getAllByText('Inferred')).toHaveLength(1)
-
-    expect(screen.getByText('4 / 25 requirements')).toBeInTheDocument()
-    expect(screen.getByLabelText('Role title')).toHaveValue('Applied Machine Learning Engineer')
-    expect(screen.getByLabelText('Company')).toHaveValue('Fernhollow AI')
+    expect(sent[1].body).toEqual({ job_id: 'job-1' })
+    expect(sent[1].headers['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('keeps the input and offers Retry when the analysis fails', async () => {
+  it('keeps the input when the analysis fails, and Retry runs both steps', async () => {
     const job = makeJob()
     let attempts = 0
     const { requests, user } = openJobPage({
@@ -247,29 +262,77 @@ describe('JobPage form', () => {
             : jsonResponse(job, 201)
         },
         'GET /api/jobs/job-1': jsonResponse(job),
+        'POST /api/generations': jsonResponse(makeGeneration({ generation_id: 'gen-5' }), 201),
       },
     })
 
     await user.type(await screen.findByLabelText('Company (optional)'), 'Fernhollow AI')
     await pasteDescription(user, JOB_DESCRIPTION)
-    await user.click(screen.getByRole('button', { name: 'Analyze job' }))
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }))
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('The job description was not analyzed')
     expect(alert).toHaveTextContent('The AI provider took too long to answer.')
     expect(alert).toHaveTextContent('req-test-123')
-    // Nothing the user entered was lost.
+    expect(progressSteps()).toEqual([
+      '1. Analyzing the job description Failed',
+      '2. Writing your resume and cover letter Waiting',
+    ])
+    // Nothing the user entered was lost, and no draft was attempted.
     expect(descriptionBox()).toHaveValue(JOB_DESCRIPTION)
     expect(screen.getByLabelText('Company (optional)')).toHaveValue('Fernhollow AI')
+    expect(screen.getByRole('button', { name: SUBMIT_LABEL })).toBeEnabled()
+    expect(posts(requests, '/api/generations')).toHaveLength(0)
 
     await user.click(within(alert).getByRole('button', { name: 'Retry' }))
 
-    expect(
-      await screen.findByRole('heading', { name: 'Review the job requirements' }),
-    ).toBeInTheDocument()
-    const posts = requests.filter((request) => request.method === 'POST')
-    expect(posts).toHaveLength(2)
-    expect(posts[1].body).toEqual(posts[0].body)
+    expect(await screen.findByRole('heading', { name: 'Workspace gen-5' })).toBeInTheDocument()
+    const analyses = posts(requests, '/api/jobs')
+    expect(analyses).toHaveLength(2)
+    expect(analyses[1].body).toEqual(analyses[0].body)
+    expect(posts(requests, '/api/generations')).toHaveLength(1)
+  })
+
+  it('retries only the generation, with the same key, when writing the draft fails', async () => {
+    const job = makeJob()
+    let attempts = 0
+    const { requests, user } = openJobPage({
+      routes: {
+        'POST /api/jobs': jsonResponse(job, 201),
+        'GET /api/jobs/job-1': jsonResponse(job),
+        'POST /api/generations': () => {
+          attempts += 1
+          return attempts === 1
+            ? errorResponse(502, 'provider_unavailable', 'The AI provider is unavailable.', {
+                retryable: true,
+              })
+            : jsonResponse(makeGeneration({ generation_id: 'gen-7' }), 201)
+        },
+      },
+    })
+
+    await screen.findByRole('heading', { name: 'Target job' })
+    await pasteDescription(user, JOB_DESCRIPTION)
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The draft was not generated')
+    expect(alert).toHaveTextContent('The AI provider is unavailable.')
+    expect(progressSteps()).toEqual([
+      '1. Analyzing the job description Done',
+      '2. Writing your resume and cover letter Failed',
+    ])
+    // The analyzed job is kept and shown; it is not paid for a second time.
+    expect(screen.getByText('Applied Machine Learning Engineer at Fernhollow AI', { exact: false })).toBeInTheDocument()
+
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByRole('heading', { name: 'Workspace gen-7' })).toBeInTheDocument()
+    expect(posts(requests, '/api/jobs')).toHaveLength(1)
+    const keys = posts(requests, '/api/generations').map((request) => request.headers['Idempotency-Key'])
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).toBeTruthy()
+    expect(keys[1]).toBe(keys[0])
   })
 
   it('shows a field error from the API next to the field it belongs to', async () => {
@@ -283,140 +346,55 @@ describe('JobPage form', () => {
 
     await screen.findByRole('heading', { name: 'Target job' })
     await pasteDescription(user, 'x')
-    await user.click(screen.getByRole('button', { name: 'Analyze job' }))
+    await user.click(screen.getByRole('button', { name: SUBMIT_LABEL }))
 
     await waitFor(() => expect(descriptionBox()).toBeInvalid())
     expect(descriptionBox()).toHaveAccessibleDescription(/Job description must not be empty/)
   })
 })
 
-describe('JobPage with existing jobs', () => {
-  const olderJob = makeJob({
-    job_id: 'job-old',
-    title: 'Data Analyst',
-    company: 'Quillmere Labs',
-    created_at: '2026-10-07T09:00:00.000Z',
-    requirements: [makeRequirement({ requirement_id: 'old-1', text: 'Working knowledge of SQL' })],
-  })
-  const newerJob = makeJob({ job_id: 'job-new', created_at: '2026-10-07T15:00:00.000Z' })
-
-  it('opens the most recent job on load, so a refresh keeps the place', async () => {
-    // Listed oldest first on purpose: the page must pick by creation time.
-    const { requests } = openJobPage({ jobs: [olderJob, newerJob] })
-
-    expect(
-      await screen.findByRole('heading', { name: 'Review the job requirements' }),
-    ).toBeInTheDocument()
-    expect(screen.getByLabelText('Role title')).toHaveValue('Applied Machine Learning Engineer')
-    expect(screen.getByLabelText('Requirement 1 text')).toHaveValue('Strong Python skills')
-    expect(requests.some((request) => request.path === '/api/jobs/job-new')).toBe(true)
-    expect(requests.some((request) => request.path === '/api/jobs/job-old')).toBe(false)
-  })
-
-  it('returns to the empty form with "Start a different job" and can go back', async () => {
-    const { user } = openJobPage({ jobs: [olderJob, newerJob] })
-
-    await user.click(await screen.findByRole('button', { name: 'Start a different job' }))
-
-    expect(await screen.findByRole('heading', { name: 'Target job' })).toBeInTheDocument()
-    expect(descriptionBox()).toHaveValue('')
-    expect(screen.getByLabelText('Role title (optional)')).toHaveValue('')
-
-    const earlier = within(screen.getByRole('region', { name: 'Jobs you already analyzed' }))
-    expect(
-      earlier.getByRole('link', {
-        name: 'Review Applied Machine Learning Engineer at Fernhollow AI',
-      }),
-    ).toHaveAttribute('href', '/job?job=job-new')
-    expect(earlier.getByText(/^1 requirement, analyzed/)).toBeInTheDocument()
-
-    await user.click(earlier.getByRole('link', { name: 'Review Data Analyst at Quillmere Labs' }))
-
-    expect(
-      await screen.findByRole('heading', { name: 'Review the job requirements' }),
-    ).toBeInTheDocument()
-    expect(screen.getByLabelText('Requirement 1 text')).toHaveValue('Working knowledge of SQL')
-  })
-
-  it('opens the form directly at /job?new=1 and a given job at /job?job=<id>', async () => {
-    const first = openJobPage({ jobs: [olderJob, newerJob], route: '/job?new=1' })
-    expect(await screen.findByRole('heading', { name: 'Target job' })).toBeInTheDocument()
-    first.unmount()
-
-    openJobPage({ jobs: [olderJob, newerJob], route: '/job?job=job-old' })
-    expect(await screen.findByLabelText('Role title')).toHaveValue('Data Analyst')
-  })
-
-  it('says so when the job in the address does not exist', async () => {
-    openJobPage({ jobs: [newerJob], route: '/job?job=missing' })
-
-    expect(
-      await screen.findByRole('heading', { name: 'This job is not available' }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open my latest job' })).toHaveAttribute('href', '/job')
-  })
-
-  it('shows a retryable error when the job list cannot be loaded', async () => {
-    let attempts = 0
-    const { user } = openJobPage({
+describe('JobPage drafts under the form', () => {
+  it('lists every draft of the session with its job, newest first', async () => {
+    openJobPage({
       routes: {
-        'GET /api/jobs': () => {
-          attempts += 1
-          return attempts === 1
-            ? errorResponse(503, 'database_unavailable', 'The database is unavailable.')
-            : jsonResponse({ jobs: [] })
-        },
+        'GET /api/generations': jsonResponse({
+          generations: [
+            makeGenerationSummary({ generation_id: 'gen-a', created_at: '2026-10-07T13:00:00.000Z', stale: true }),
+            makeGenerationSummary({
+              generation_id: 'gen-b',
+              job_id: 'job-2',
+              job_title: 'Data Analyst',
+              company: 'Quillmere Labs',
+              created_at: '2026-10-07T14:00:00.000Z',
+            }),
+          ],
+        }),
       },
     })
 
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('Your jobs could not be loaded')
-    await user.click(within(alert).getByRole('button', { name: 'Retry' }))
+    const drafts = within(await screen.findByRole('region', { name: 'Your drafts' }))
+    const links = await drafts.findAllByRole('link')
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/workspace/gen-b',
+      '/workspace/gen-a',
+    ])
+    const items = drafts.getAllByRole('listitem')
+    expect(within(items[0]).getByText('Data Analyst at Quillmere Labs')).toBeInTheDocument()
+    expect(within(items[1]).getByText('Applied Machine Learning Engineer at Fernhollow AI')).toBeInTheDocument()
+    expect(within(items[1]).getByText('Stale')).toBeInTheDocument()
+  })
+
+  it('says so when nothing has been generated yet', async () => {
+    openJobPage()
+
+    expect(await screen.findByText('No draft has been generated yet.')).toBeInTheDocument()
+  })
+
+  it('always opens the form at /job, even when the session already has jobs', async () => {
+    const { requests } = openJobPage({ jobs: [makeJob()] })
 
     expect(await screen.findByRole('heading', { name: 'Target job' })).toBeInTheDocument()
-  })
-})
-
-describe('JobPage untrusted text', () => {
-  it('renders HTML in the job text as plain text, never as markup', async () => {
-    const description =
-      'We need <b>bold</b> people.\n<img src="x" onerror="window.__jobXss = 1">\n<script>window.__jobXss = 2</script>'
-    const job = makeJob({
-      title: '<u>Engineer</u>',
-      description,
-      role_summary: 'A role for <i>careful</i> people <script>window.__jobXss = 3</script>',
-      requirements: [
-        makeRequirement({
-          requirement_id: 'req-x',
-          text: 'Knows <b>HTML</b> & <script>alert(1)</script>',
-          source_span: sourceSpan('<img src="x" onerror="window.__jobXss = 1">', description),
-        }),
-      ],
-    })
-    const { user } = openJobPage({ jobs: [job] })
-
-    expect(await screen.findByLabelText('Requirement 1 text')).toHaveValue(
-      'Knows <b>HTML</b> & <script>alert(1)</script>',
-    )
-    expect(screen.getByLabelText('Role title')).toHaveValue('<u>Engineer</u>')
-    expect(
-      screen.getByText('A role for <i>careful</i> people <script>window.__jobXss = 3</script>'),
-    ).toBeInTheDocument()
-
-    // The full posting, behind its disclosure.
-    await user.click(screen.getByRole('button', { name: /Job description as pasted/ }))
-    const posting = await screen.findByRole('region', { name: 'Job description text' })
-    expect(posting.textContent).toBe(description)
-
-    // The supporting excerpt of the requirement.
-    await user.click(screen.getByRole('button', { name: 'View source of requirement 1' }))
-    expect(
-      await screen.findByText('<img src="x" onerror="window.__jobXss = 1">'),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Source: Job description')).toBeInTheDocument()
-
-    // None of it became an element, and nothing ran.
-    expect(document.body.querySelector('img, script, b, i, u, iframe')).toBeNull()
-    expect('__jobXss' in window).toBe(false)
+    expect(descriptionBox()).toHaveValue('')
+    expect(requests.some((request) => request.path.startsWith('/api/jobs'))).toBe(false)
   })
 })

@@ -38,8 +38,6 @@ describe('StartPage', () => {
     const notice = within(screen.getByRole('region', { name: 'How your data is handled' }))
     expect(notice.getByText(/sent to the configured AI provider \(OpenAI\)/)).toBeInTheDocument()
     expect(notice.getByText(/for at most 24 hours/)).toBeInTheDocument()
-    expect(notice.getByText(/tied to this browser tab/)).toBeInTheDocument()
-    expect(notice.getByText(/deletes\s+everything immediately/)).toBeInTheDocument()
 
     expect(screen.getByLabelText('Resume/CV text')).toBeInTheDocument()
     expect(screen.getByLabelText('LinkedIn profile text')).toBeInTheDocument()

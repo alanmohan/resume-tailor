@@ -1,7 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Generation } from '@/lib/types'
 import { deferred, errorResponse, jsonResponse } from '@/test/mockApi'
+import { downloadPdf } from '../pdfDocument'
 import {
   GENERATION_ID,
   makeClaim,
@@ -17,10 +18,13 @@ import {
   claimElement,
   draftIsShown,
   openWorkspace,
-  stubPrint,
 } from './helpers'
 
 allowForSlowMachine()
+
+// The real module builds a PDF and asks the browser to save it. These tests
+// are about when the Workspace asks for that, so the save function is a spy.
+vi.mock('../pdfDocument', () => ({ downloadPdf: vi.fn() }))
 
 const DRAFT = `/api/generations/${GENERATION_ID}`
 
@@ -43,6 +47,7 @@ function afterEdit(generation: Generation, itemId: string, text: string): Genera
 
 beforeEach(() => {
   stubWideScreen()
+  vi.mocked(downloadPdf).mockReset()
 })
 
 describe('Workspace documents', () => {
@@ -534,7 +539,7 @@ describe('Workspace regenerating a statement', () => {
   })
 })
 
-describe('Workspace copy and print', () => {
+describe('Workspace copy and download', () => {
   it('copies the active document as plain text', async () => {
     const { user } = openWorkspace(withNothingFlagged(makeGeneration()))
     await draftIsShown()
@@ -579,45 +584,65 @@ describe('Workspace copy and print', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
-  it('prints straight away when nothing needs review', async () => {
-    const print = stubPrint()
+  it('downloads the active document straight away when nothing needs review', async () => {
+    const generation = withNothingFlagged(makeGeneration())
+    const { user } = openWorkspace(generation)
+    await draftIsShown()
+
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
+
+    expect(await screen.findByText('Resume downloaded')).toBeInTheDocument()
+    expect(downloadPdf).toHaveBeenCalledTimes(1)
+    expect(downloadPdf).toHaveBeenCalledWith(generation, 'resume')
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    await user.click(screen.getByRole('tab', { name: 'Cover letter' }))
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
+
+    expect(await screen.findByText('Cover letter downloaded')).toBeInTheDocument()
+    expect(downloadPdf).toHaveBeenLastCalledWith(generation, 'cover_letter')
+  })
+
+  it('says so when the PDF cannot be created', async () => {
+    vi.mocked(downloadPdf).mockImplementation(() => {
+      throw new Error('This draft has no resume.')
+    })
     const { user } = openWorkspace(withNothingFlagged(makeGeneration()))
     await draftIsShown()
 
-    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
 
-    expect(print).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(await screen.findByText(/The PDF could not be created/)).toBeInTheDocument()
+    expect(downloadPdf).toHaveBeenCalledTimes(1)
   })
 
-  it('asks for review and an explicit acknowledgement before printing flagged statements', async () => {
-    const print = stubPrint()
+  it('asks for review and an explicit acknowledgement before downloading flagged statements', async () => {
     const { user } = openWorkspace()
     await draftIsShown()
-    const printButton = screen.getByRole('button', { name: 'Print / Save as PDF' })
+    const downloadButton = screen.getByRole('button', { name: 'Download PDF' })
 
-    await user.click(printButton)
+    await user.click(downloadButton)
 
-    const dialog = within(await screen.findByRole('dialog', { name: 'Review before printing' }))
-    expect(print).not.toHaveBeenCalled()
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before downloading' }))
+    expect(downloadPdf).not.toHaveBeenCalled()
     expect(dialog.getByText(/1 statement has not been confirmed by validation/)).toBeInTheDocument()
     expect(dialog.getByText('Needs review')).toBeInTheDocument()
     expect(dialog.getByText('Resume - Experience: Software Engineer, Northwind Robotics')).toBeInTheDocument()
     expect(dialog.getByText('Cut the nightly reporting job from 3 hours to 45 minutes')).toBeInTheDocument()
-    const printAnyway = dialog.getByRole('button', { name: 'Print anyway' })
-    expect(printAnyway).toBeDisabled()
+    const downloadAnyway = dialog.getByRole('button', { name: 'Download anyway' })
+    expect(downloadAnyway).toBeDisabled()
 
     await user.click(dialog.getByRole('checkbox', { name: /I have read these statements/ }))
-    expect(printAnyway).toBeEnabled()
-    await user.click(printAnyway)
+    expect(downloadAnyway).toBeEnabled()
+    await user.click(downloadAnyway)
 
-    expect(print).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('Resume downloaded')).toBeInTheDocument()
+    expect(downloadPdf).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await waitFor(() => expect(printButton).toHaveFocus())
+    await waitFor(() => expect(downloadButton).toHaveFocus())
   })
 
   it('keeps the document off paper until the flagged statements are acknowledged', async () => {
-    stubPrint()
     const { user } = openWorkspace()
     await draftIsShown()
     const root = document.querySelector('.ws-root') as HTMLElement
@@ -627,29 +652,28 @@ describe('Workspace copy and print', () => {
     expect(root).toHaveAttribute('data-print-ready', 'false')
     expect(notice()).toHaveClass('ws-print-notice')
 
-    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Review before printing' }))
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before downloading' }))
     // Opening the dialog, or cancelling it, is not an acknowledgement.
     expect(root).toHaveAttribute('data-print-ready', 'false')
     await user.click(dialog.getByRole('checkbox', { name: /I have read these statements/ }))
-    await user.click(dialog.getByRole('button', { name: 'Print anyway' }))
+    await user.click(dialog.getByRole('button', { name: 'Download anyway' }))
 
     expect(root).toHaveAttribute('data-print-ready', 'true')
     expect(notice()).toBeNull()
   })
 
   it('asks again on paper when the draft changes after an acknowledgement', async () => {
-    stubPrint()
     const generation = makeGeneration()
     const { user } = openWorkspace(generation, {
       [`PATCH ${DRAFT}`]: () => jsonResponse(afterEdit(generation, 'b-1', 'Built a search service')),
     })
     await draftIsShown()
     const root = document.querySelector('.ws-root') as HTMLElement
-    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Review before printing' }))
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before downloading' }))
     await user.click(dialog.getByRole('checkbox', { name: /I have read these statements/ }))
-    await user.click(dialog.getByRole('button', { name: 'Print anyway' }))
+    await user.click(dialog.getByRole('button', { name: 'Download anyway' }))
     expect(root).toHaveAttribute('data-print-ready', 'true')
 
     await user.click(claim('b-1').getByRole('button', { name: 'Edit this statement' }))
@@ -669,29 +693,27 @@ describe('Workspace copy and print', () => {
     expect(screen.queryByText(/Review the flagged statements in the app before printing/)).toBeNull()
   })
 
-  it('gates printing and copying when the server counts an unsupported statement', async () => {
-    const print = stubPrint()
+  it('gates downloading and copying when the server counts an unsupported statement', async () => {
     const generation = withNothingFlagged(makeGeneration())
     generation.validation = { ...generation.validation, unsupported_count: 1 }
     const { user } = openWorkspace(generation)
     await draftIsShown()
 
     expect(document.querySelector('.ws-root')).toHaveAttribute('data-print-ready', 'false')
-    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
 
-    expect(await screen.findByRole('dialog', { name: 'Review before printing' })).toBeInTheDocument()
-    expect(print).not.toHaveBeenCalled()
+    expect(await screen.findByRole('dialog', { name: 'Review before downloading' })).toBeInTheDocument()
+    expect(downloadPdf).not.toHaveBeenCalled()
   })
 
-  it('goes to the statement from the review dialog without printing', async () => {
-    const print = stubPrint()
+  it('goes to the statement from the review dialog without downloading', async () => {
     const generation = withClaim(makeGeneration(), 'cl-2', { validation_status: 'user_edited', user_edited: true })
     generation.validation = { ...generation.validation, state: 'needs_revalidation', user_edited_count: 1 }
     const { user } = openWorkspace(generation)
     await draftIsShown()
 
-    await user.click(screen.getByRole('button', { name: 'Print / Save as PDF' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Review before printing' }))
+    await user.click(screen.getByRole('button', { name: 'Download PDF' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Review before downloading' }))
     expect(dialog.getByText(/2 statements have not been confirmed/)).toBeInTheDocument()
     expect(dialog.getByText(/edited after the last validation/)).toBeInTheDocument()
     const reviewButtons = dialog.getAllByRole('button', { name: 'Review' })
@@ -703,10 +725,10 @@ describe('Workspace copy and print', () => {
     await waitFor(() => expect(claimElement('cl-2')).toHaveFocus())
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('tab', { name: 'Cover letter' })).toHaveAttribute('aria-selected', 'true')
-    expect(print).not.toHaveBeenCalled()
+    expect(downloadPdf).not.toHaveBeenCalled()
   })
 
-  it('marks only the active document as the one to print', async () => {
+  it('marks only the active document as the one the browser would print', async () => {
     const { user } = openWorkspace()
     await draftIsShown()
     const panels = () =>

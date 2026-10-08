@@ -14,7 +14,7 @@ import { jobLabel } from './workspaceModel'
 
 const PAGE_TITLE = 'Your tailored draft'
 
-/** `to` is the draft's own job when one is known; the bare "/job" opens the newest job. */
+/** `to` is the draft's own job when one is known; the bare "/job" is the form for a new job. */
 function BackToJobLink({ label, to = '/job' }: { label: string; to?: string }) {
   return (
     // text-foreground: inside the red failure alert the link should still look like a normal button.

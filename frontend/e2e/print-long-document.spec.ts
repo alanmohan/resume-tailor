@@ -1,16 +1,17 @@
 /**
- * Printing a long resume. A profile with sixteen roles produces a document
- * that needs more than one page; in the print layout it must flow down the
+ * A long resume. A profile with sixteen roles produces a document that needs
+ * more than one page. The downloaded PDF must have those pages, and for a
+ * visitor who prints from the browser the print layout must flow down the
  * pages as one column without being clipped or cut off at the side.
  */
 import { longJob, longResume } from './support/data.ts'
 import {
-  analyzeJob,
   confirmProfile,
   expectNoHorizontalOverflow,
+  expectPdfDownload,
   extractProfile,
-  generateDraft,
   screenshot,
+  tailorJob,
 } from './support/steps.ts'
 import { expect, test } from './support/test.ts'
 
@@ -30,17 +31,26 @@ interface PrintLayout {
   columns: string
 }
 
-test('a multi-page resume prints as one unclipped column', async ({ page }) => {
+test('a multi-page resume downloads as a multi-page PDF and prints as one unclipped column', async ({ page }) => {
   await extractProfile(page, { resume: longResume() })
   await expect(page.getByRole('region', { name: 'Experience' }).getByRole('group')).toHaveCount(16)
   await confirmProfile(page)
-  await analyzeJob(page, longJob())
-  await generateDraft(page)
+  await tailorJob(page, longJob())
 
   const resume = page.getByRole('tabpanel', { name: 'Resume' })
   await expect(resume.locator('.ws-entry')).not.toHaveCount(0)
   await expectNoHorizontalOverflow(page, 'Workspace with a long resume')
   await screenshot(page, 'desktop-10-workspace-long-resume')
+
+  // The downloaded file: several pages of real text.
+  const file = await expectPdfDownload(
+    page,
+    page.getByRole('button', { name: 'Download PDF' }),
+    'Casey Whitlock - Resume.pdf',
+  )
+  const fileText = file.toString('latin1')
+  expect((fileText.match(/\/Type\s*\/Page\b(?!s)/g) ?? []).length).toBeGreaterThanOrEqual(2)
+  expect(fileText).toContain('/Font')
 
   await page.setViewportSize(A4)
   await page.emulateMedia({ media: 'print' })

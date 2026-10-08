@@ -1,13 +1,12 @@
 /**
  * TanStack Query keys, in one place so every screen reads and invalidates the
- * same cache entries. Lists and their items share a prefix, so invalidating
- * `queryKeys.jobs` also refreshes every `queryKeys.job(id)`.
+ * same cache entries. A list and its items share a prefix, so invalidating
+ * `queryKeys.generations` also refreshes every `queryKeys.generation(id)`.
  */
 export const queryKeys = {
   ready: ['ready'] as const,
   session: ['session'] as const,
   profile: ['profile'] as const,
-  jobs: ['jobs'] as const,
   job: (jobId: string) => ['jobs', jobId] as const,
   generations: ['generations'] as const,
   generation: (generationId: string) => ['generations', generationId] as const,

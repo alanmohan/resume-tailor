@@ -40,7 +40,7 @@ MongoDB                     OpenAI API
 
 | Layer | Implementation | Where |
 |---|---|---|
-| Frontend | React 19, TypeScript, Vite 8, Tailwind CSS v4, shadcn/ui components, TanStack Query 5, react-router, react-hook-form + zod | `frontend/` |
+| Frontend | React 19, TypeScript, Vite 8, Tailwind CSS v4, shadcn/ui components, TanStack Query 5, react-router, react-hook-form + zod, jsPDF (PDF download) | `frontend/` |
 | Backend | Python 3.12, FastAPI, Pydantic v2, pydantic-settings, uvicorn | `backend/app/` |
 | Database | MongoDB through PyMongo's asyncio client (`AsyncMongoClient`), so database calls do not block the event loop | `backend/app/db.py`, `backend/app/repositories/` |
 | Generation | OpenAI Python SDK, `responses.parse` with a Pydantic model as strict JSON schema; default model `gpt-6-luna`, alternative `gpt-5.6-terra` | `backend/app/providers/openai/` |
@@ -60,8 +60,8 @@ Not part of the running application: `backend/tests/` and `frontend/e2e/` (tests
 |---|---|---|
 | Start (`/`) | Reads the privacy notice, pastes up to three texts or loads the fictional sample, submits | `POST /api/sessions`, `POST /api/profiles/ingest` |
 | Profile review (`/profile`) | Edits records, resolves conflicts, confirms | `GET/PATCH /api/profile`, `POST /api/profile/confirm` |
-| Target job (`/job`) | Pastes a job description, reviews the extracted requirements, generates | `POST/GET/PATCH /api/jobs`, `POST /api/generations` |
-| Workspace (`/workspace/:generationId`) | Reads both documents, opens citations, edits, regenerates one statement, revalidates, corrects coverage, copies or prints | `GET/PATCH /api/generations/{id}`, `.../validate`, `.../items/{item_id}/regenerate`, `GET /api/evidence/{id}` |
+| Target job (`/job`) | Pastes a job description and presses "Tailor my resume": the job is analyzed and the draft generated in one run, with a two-step progress list. `/job?job=<id>` shows a stored job read-only with "Generate a new draft" | `POST /api/jobs`, `GET /api/jobs/{id}`, `POST /api/generations` |
+| Workspace (`/workspace/:generationId`) | Reads both documents, opens citations, edits, regenerates one statement, revalidates, corrects coverage, reads the job's requirements, copies or downloads a PDF | `GET/PATCH /api/generations/{id}`, `.../validate`, `.../items/{item_id}/regenerate`, `GET /api/evidence/{id}`, `GET /api/jobs/{id}` |
 
 ## 2. The pipeline, step by step
 
@@ -73,7 +73,7 @@ Labelled source text
   -> embeddings stored in MongoDB, with a per-owner cache      2.4
 
 Job description
-  -> requirements (model), checked and reviewed                2.5
+  -> requirements (model), checked by the server               2.5
   -> one query per requirement + one role query, embedded      2.6
   -> ranking scoped to owner + profile + version               2.6
   -> bounded evidence context + confirmed profile metadata     2.7
@@ -180,7 +180,7 @@ The description is stored untouched; the model reads a whitespace-normalised cop
 
 The prompt asks for required qualifications first, then preferred ones, then only those duties that name a checkable skill, tool or method not already covered; statements about values, culture, benefits, pay and location are left out; and `role_summary` must name the technologies and problem areas the posting gives anywhere, because it is the role query used for retrieval.
 
-The user may edit, add or remove requirements. An edited or added requirement is marked `user_edited`; a change increases the job's `version`.
+The API lets a client edit, add or remove requirements (`PATCH /api/jobs/{job_id}`): an edited or added requirement is marked `user_edited`, and a change increases the job's `version`. The web app no longer uses that route. It shows the extracted requirements read-only in the workspace's Requirements tab; the user's say over them is the per-requirement "Correct" control in the Coverage tab.
 
 ### 2.6 Retrieval
 
@@ -478,10 +478,12 @@ Code: `frontend/src/`.
 - **API access:** `lib/api.ts` is the only module that calls `fetch`. It returns typed data or throws an `ApiError` built from the error envelope. `VITE_API_BASE_URL` is the only build-time setting and is public.
 - **Session:** `lib/sessionStore.ts` keeps `{token, expiresAt}` in `sessionStorage`. Any 401 clears the token, and the shell replaces the page with "Your session has ended". The session is created when the Start form is submitted, not on page load. Because a sleeping free-tier server can take about a minute to wake, session creation retries for up to about 90 seconds and tells the user the server is waking.
 - **Server state:** TanStack Query. Reads retry at most twice and only for errors the API marked retryable. Mutations never retry automatically, because most are quota-charged AI calls; the user presses Retry, and input is kept after a failure.
+- **Target job, one run:** `pages/job/JobPage.tsx` owns the run. `JobForm.tsx` does step 1 (`POST /api/jobs`); on success the page moves to `/job?job=<id>` (`ExistingJob.tsx`) and starts step 2 (`useGenerateDraft.ts`, `generateDraft.ts`), then opens the workspace. `RunProgress.tsx` lists both steps with a text status (Waiting, In progress, Done, Failed) in an `aria-live` region; there is no percentage. If step 1 fails the form keeps its input and Retry repeats the whole run. If step 2 fails the stored job stays on screen and Retry repeats only the generation, so the job is not analyzed (and charged) twice. The submit button is disabled while the profile is not confirmed and indexed.
 - **Generation:** one idempotency key per attempt; pressing Retry sends the same key. If the first request did complete (for example its response was lost on the way back), the stored draft is returned instead of a second one being generated; if it failed, the same draft ID is run again. If the server answers `generation_in_progress`, the client polls the running draft every 3 seconds.
-- **Workspace:** two panes from the `lg` width up (documents left, evidence and coverage right); on narrow screens coverage is a third tab and evidence opens in a sheet. Statuses are shown with text labels, not colour alone.
-- **Print:** `pages/workspace/workspace.css` prints exactly one document (the active one) as a single column of black text, without badges, controls or panels, with page-break rules for headings and entries.
-- **Export gate:** Print and Copy go through the same check (`pages/workspace/Workspace.tsx`, `ExportGateDialog.tsx`). If any statement is `needs_review`, `unsupported` or `user_edited`, a dialog lists those statements, offers to go to each one, and exports only after an explicit acknowledgement.
+- **Workspace:** two panes from the `lg` width up (documents left; Evidence, Coverage and Requirements tabs right); on narrow screens Coverage and Requirements are tabs next to the two documents and evidence opens in a sheet. The Requirements tab (`RequirementsPanel.tsx`) loads the draft's job and lists its requirements read-only, grouped Required and Preferred. Statuses are shown with text labels, not colour alone.
+- **Download PDF:** `pages/workspace/pdfDocument.ts` lays the active document out with jsPDF text calls (US Letter, 0.75 inch margins, built-in Helvetica and Times, selectable text) and saves it as `<Name> - Resume.pdf` or `<Name> - Cover Letter.pdf`. It reuses the section model of `workspaceModel.ts`, replaces characters the built-in fonts cannot draw (`pdfSafeText`), never splits a line across pages and keeps an entry heading with its first bullet. The module, and jsPDF with it, is loaded on the first download, not with the page. The file has no badges, statuses or controls.
+- **Browser print:** there is no Print button. For a user who prints from the browser (Ctrl/Cmd+P), `pages/workspace/workspace.css` still prints exactly one document (the active one) as a single column of black text, without badges, controls or panels, with page-break rules for headings and entries; while flagged statements are unacknowledged it prints a notice instead.
+- **Export gate:** Download PDF and Copy go through the same check (`pages/workspace/Workspace.tsx`, `ExportGateDialog.tsx`). If any statement is `needs_review`, `unsupported` or `user_edited`, a dialog lists those statements, offers to go to each one, and exports only after an explicit acknowledgement.
 - **Sample data:** `src/sample/sampleData.ts` is generated from the fictional fixtures by `backend/fixtures/build_frontend_sample.py`. No real profile data is in the bundle.
 - **Theme:** light and dark, stored in `localStorage` (the only thing kept there).
 
@@ -496,7 +498,7 @@ Stated plainly, because several of them affect how much the output can be truste
 - A capitalised name at the start of a sentence is only checked when it is also a keyword of the job's requirements, because it cannot be told apart from an ordinary first word.
 - Connective cover-letter text that names something absent from the profile is kept and flagged `needs_review`, not removed.
 - A statement regenerated on request, or edited and revalidated, is stored with its real status, including `unsupported`. Only initial generation removes unsupported statements.
-- In the user interface, printing or copying a draft with flagged statements requires an explicit acknowledgement but is not blocked, even when a statement is `unsupported`.
+- In the user interface, downloading or copying a draft with flagged statements requires an explicit acknowledgement but is not blocked, even when a statement is `unsupported`.
 - The instruction guard is a list of known phrasings, not a general detector.
 - The semantic verifier is off by default and is itself a language model; its answer is a second opinion, not a guarantee.
 

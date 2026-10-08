@@ -1,6 +1,6 @@
 import { useRef, useState, type CSSProperties } from 'react'
 import { flushSync } from 'react-dom'
-import { Copy, Printer } from 'lucide-react'
+import { Copy, Download } from 'lucide-react'
 import { cn } from 'cn'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/app'
@@ -19,6 +19,7 @@ import { CoverLetterDocument, ResumeDocument } from './Documents'
 import { EvidenceDetail, EvidencePanel } from './EvidencePanel'
 import { ExportGateDialog, type ExportAction } from './ExportGateDialog'
 import { useIsWriting } from './generationData'
+import { RequirementsPanel } from './RequirementsPanel'
 import { StaleBanner } from './StaleBanner'
 import { ValidationBar } from './ValidationBar'
 import { WorkspaceContext } from './workspaceContext'
@@ -46,14 +47,18 @@ import './workspace.css'
  */
 const TWO_PANE_QUERY = 'print, (min-width: 64rem)'
 
-const COVERAGE_TAB = 'coverage'
-const SIDE_TABS = ['evidence', 'coverage'] as const
+/** The tabs of the right-hand panel on a wide screen. */
+const SIDE_TABS = ['evidence', 'coverage', 'requirements'] as const
 type SideTab = (typeof SIDE_TABS)[number]
 
+/** On a narrow screen these two panels are tabs next to the documents. */
+const PANEL_TABS = ['coverage', 'requirements'] as const
+type PanelTab = (typeof PANEL_TABS)[number]
+
 /**
- * Tab panels stay mounted while another tab is shown, so an edit in progress
- * survives switching tabs and the print stylesheet can always reach the
- * active document. An inactive panel is taken out of the layout with an
+ * Document and coverage panels stay mounted while another tab is shown, so an
+ * edit in progress survives switching tabs and the print stylesheet can
+ * always reach the active document. An inactive panel is taken out of the layout with an
  * inline style, which also keeps it out of the accessibility tree.
  */
 function hiddenUnless(visible: boolean): CSSProperties | undefined {
@@ -62,22 +67,24 @@ function hiddenUnless(visible: boolean): CSSProperties | undefined {
 
 /**
  * The Workspace screen for a completed draft: the resume and cover letter on
- * the left, evidence and coverage on the right. On narrow screens coverage
- * becomes a third tab and evidence opens in a bottom sheet.
+ * the left; evidence, coverage and the job's requirements on the right. On
+ * narrow screens coverage and requirements become tabs next to the documents
+ * and evidence opens in a bottom sheet.
  */
 export function Workspace({ generation }: { generation: Generation }) {
   const twoPane = useMediaQuery(TWO_PANE_QUERY)
-  /** The document that Copy and Print act on: the one shown, or shown last. */
+  /** The document that Copy and Download PDF act on: the one shown, or shown last. */
   const [activeDocument, setActiveDocument] = useState<DocumentKind>('resume')
-  const [coverageTabOpen, setCoverageTabOpen] = useState(false)
+  /** Narrow screens only: the panel shown instead of a document, if any. */
+  const [openPanelTab, setOpenPanelTab] = useState<PanelTab | null>(null)
   const [sideTab, setSideTab] = useState<SideTab>('coverage')
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
   const [evidenceSheetOpen, setEvidenceSheetOpen] = useState(false)
   const [exportGateOpen, setExportGateOpen] = useState(false)
   /** The export the review dialog was opened for. Kept after it closes, so its wording stays put. */
-  const [gatedAction, setGatedAction] = useState<ExportAction>('print')
-  /** The draft revision whose flagged statements the user agreed to print as they are. */
-  const [printAcknowledgedRevision, setPrintAcknowledgedRevision] = useState<number | null>(null)
+  const [gatedAction, setGatedAction] = useState<ExportAction>('download')
+  /** The draft revision whose flagged statements the user agreed to download as they are. */
+  const [acknowledgedRevision, setAcknowledgedRevision] = useState<number | null>(null)
   /** The control that opened the dialog or sheet, so focus can return to it. */
   const overlayOpener = useRef<HTMLElement | null>(null)
   /** A statement to go to once the open dialog or sheet has closed. */
@@ -92,18 +99,19 @@ export function Workspace({ generation }: { generation: Generation }) {
   /**
    * Whether the print stylesheet may show the document. The browser's own
    * print command (Ctrl/Cmd+P, the browser menu) never passes through the
-   * Print button, so the review gate has to hold in the stylesheet as well:
-   * until the user has acknowledged this revision, paper gets a notice instead.
+   * Download PDF button and its review dialog, so the review gate has to hold
+   * in the stylesheet as well: until the user has acknowledged this revision
+   * there, paper gets a notice instead.
    */
-  const printReady = !reviewRequired || printAcknowledgedRevision === generation.revision
+  const printReady = !reviewRequired || acknowledgedRevision === generation.revision
 
-  const showingCoverageTab = !twoPane && coverageTabOpen
-  const mainTab = showingCoverageTab ? COVERAGE_TAB : activeDocument
+  const shownPanelTab = twoPane ? null : openPanelTab
+  const mainTab = shownPanelTab ?? activeDocument
 
   function handleMainTabChange(value: string) {
     const kind = DOCUMENT_KINDS.find((candidate) => candidate === value)
     if (kind) setActiveDocument(kind)
-    setCoverageTabOpen(value === COVERAGE_TAB)
+    setOpenPanelTab(PANEL_TABS.find((candidate) => candidate === value) ?? null)
   }
 
   function handleSideTabChange(value: string) {
@@ -133,7 +141,7 @@ export function Workspace({ generation }: { generation: Generation }) {
     // Commit the tab switch before focusing: an element in a hidden panel cannot take focus.
     flushSync(() => {
       setActiveDocument(located.documentKind)
-      setCoverageTabOpen(false)
+      setOpenPanelTab(null)
     })
     const element = document.getElementById(claimElementId(itemId))
     element?.scrollIntoView({ block: 'center' })
@@ -179,15 +187,30 @@ export function Workspace({ generation }: { generation: Generation }) {
     }
   }
 
+  /**
+   * Save the active document as a PDF file. The PDF code (and the jsPDF
+   * library it needs) is only loaded here, on the first download, so it is
+   * not part of what every visitor has to load.
+   */
+  async function downloadActiveDocument() {
+    try {
+      const { downloadPdf } = await import('./pdfDocument')
+      downloadPdf(generation, activeDocument)
+      toast.success(`${DOCUMENT_LABEL[activeDocument]} downloaded`)
+    } catch {
+      toast.error('The PDF could not be created. Use Copy to take the text instead.')
+    }
+  }
+
   function runExport(action: ExportAction) {
-    if (action === 'print') window.print()
+    if (action === 'download') void downloadActiveDocument()
     else void copyActiveDocument()
   }
 
   /**
-   * Print or copy straight away only when nothing is waiting for the user's
-   * review. Otherwise the review dialog comes first, for both: a copied
-   * document leaves the app just as a printed one does.
+   * Download or copy straight away only when nothing is waiting for the
+   * user's review. Otherwise the review dialog comes first, for both: a
+   * copied document leaves the app just as a downloaded one does.
    */
   function requestExport(action: ExportAction) {
     if (reviewRequired) {
@@ -200,13 +223,10 @@ export function Workspace({ generation }: { generation: Generation }) {
   }
 
   function exportAnyway() {
-    // Close the dialog and unlock the print stylesheet before the browser
-    // takes its print snapshot. The stylesheet also hides any dialog, in case
-    // it is still animating out.
-    flushSync(() => {
-      setExportGateOpen(false)
-      if (gatedAction === 'print') setPrintAcknowledgedRevision(generation.revision)
-    })
+    setExportGateOpen(false)
+    // Acknowledging a download of this revision also lets the browser's own
+    // print command show the document (see printReady above).
+    if (gatedAction === 'download') setAcknowledgedRevision(generation.revision)
     runExport(gatedAction)
   }
 
@@ -221,8 +241,8 @@ export function Workspace({ generation }: { generation: Generation }) {
         {/* Paper only (see workspace.css): what a print started from the browser shows instead of the document. */}
         {printReady ? null : (
           <p className="ws-print-notice hidden">
-            Review the flagged statements in the app before printing. Use the Print / Save as PDF
-            button on the page to see them.
+            Review the flagged statements in the app before printing. Use the Download PDF button
+            on the page to see them.
           </p>
         )}
         <div className="print:hidden">
@@ -260,9 +280,14 @@ export function Workspace({ generation }: { generation: Generation }) {
               <TabsList className={twoPane ? undefined : 'w-full sm:w-fit'}>
                 <TabsTrigger value="resume">{DOCUMENT_LABEL.resume}</TabsTrigger>
                 <TabsTrigger value="cover_letter">{DOCUMENT_LABEL.cover_letter}</TabsTrigger>
-                {twoPane ? null : <TabsTrigger value={COVERAGE_TAB}>Coverage</TabsTrigger>}
+                {twoPane ? null : (
+                  <>
+                    <TabsTrigger value="coverage">Coverage</TabsTrigger>
+                    <TabsTrigger value="requirements">Requirements</TabsTrigger>
+                  </>
+                )}
               </TabsList>
-              {showingCoverageTab ? null : (
+              {shownPanelTab ? null : (
                 <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
@@ -278,10 +303,10 @@ export function Workspace({ generation }: { generation: Generation }) {
                     type="button"
                     size="sm"
                     aria-describedby="document-actions-hint"
-                    onClick={() => requestExport('print')}
+                    onClick={() => requestExport('download')}
                   >
-                    <Printer aria-hidden="true" />
-                    Print / Save as PDF
+                    <Download aria-hidden="true" />
+                    Download PDF
                   </Button>
                   <span id="document-actions-hint" className="sr-only">
                     Applies to the {DOCUMENT_LABEL[activeDocument].toLowerCase()} only, without
@@ -291,7 +316,7 @@ export function Workspace({ generation }: { generation: Generation }) {
               )}
             </div>
 
-            {showingCoverageTab ? null : <ValidationBar flagged={flagged} />}
+            {shownPanelTab ? null : <ValidationBar flagged={flagged} />}
 
             {DOCUMENT_KINDS.map((kind) => (
               <TabsContent
@@ -314,26 +339,33 @@ export function Workspace({ generation }: { generation: Generation }) {
             ))}
 
             {twoPane ? null : (
-              <TabsContent
-                value={COVERAGE_TAB}
-                forceMount
-                className="print:hidden"
-                style={hiddenUnless(showingCoverageTab)}
-              >
-                <CoveragePanel />
-              </TabsContent>
+              <>
+                <TabsContent
+                  value="coverage"
+                  forceMount
+                  className="print:hidden"
+                  style={hiddenUnless(shownPanelTab === 'coverage')}
+                >
+                  <CoveragePanel />
+                </TabsContent>
+                {/* Read-only, so it is only mounted (and its job only loaded) when opened. */}
+                <TabsContent value="requirements" className="print:hidden">
+                  <RequirementsPanel />
+                </TabsContent>
+              </>
             )}
           </Tabs>
 
           {twoPane ? (
             <aside
-              aria-label="Evidence and coverage"
+              aria-label="Evidence, coverage and requirements"
               className="sticky top-20 flex max-h-[calc(100svh-6.5rem)] flex-col rounded-xl border bg-card print:hidden"
             >
               <Tabs value={sideTab} onValueChange={handleSideTabChange} className="min-h-0 flex-1 gap-0">
                 <TabsList className="m-3 w-auto self-stretch">
                   <TabsTrigger value="evidence">Evidence</TabsTrigger>
                   <TabsTrigger value="coverage">Coverage</TabsTrigger>
+                  <TabsTrigger value="requirements">Requirements</TabsTrigger>
                 </TabsList>
                 {/* Announced politely, so choosing a badge reads the evidence without moving focus. */}
                 <TabsContent
@@ -350,6 +382,9 @@ export function Workspace({ generation }: { generation: Generation }) {
                   style={hiddenUnless(sideTab === 'coverage')}
                 >
                   <CoveragePanel />
+                </TabsContent>
+                <TabsContent value="requirements" className="min-h-0 overflow-y-auto px-4 pb-4">
+                  <RequirementsPanel />
                 </TabsContent>
               </Tabs>
             </aside>

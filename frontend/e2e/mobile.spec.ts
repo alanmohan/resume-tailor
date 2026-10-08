@@ -1,17 +1,18 @@
 /**
  * A phone-sized screen (375 x 812): the workflow up to the workspace, with
- * no sideways scrolling on any screen, the three workspace tabs, and
+ * no sideways scrolling on any screen, the four workspace tabs, and
  * evidence in a bottom sheet.
  */
 import {
   ACKNOWLEDGEMENT,
   DEMO_BANNER,
+  TAILOR_BUTTON,
   confirmProfile,
   expectNoHorizontalOverflow,
   extractSampleProfile,
-  generateDraft,
   heading,
   screenshot,
+  workspaceOpened,
 } from './support/steps.ts'
 import { expect, test } from './support/test.ts'
 
@@ -56,19 +57,14 @@ test('the workflow fits a 375px screen and the workspace uses tabs and a source 
   await page.getByRole('button', { name: 'Use sample job' }).tap()
   await expectNoHorizontalOverflow(page, 'Target job form')
   await screenshot(page, 'mobile-3-job-form')
-  await page.getByRole('button', { name: 'Analyze job' }).tap()
-
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
-  await expectNoHorizontalOverflow(page, 'Job requirement review')
-  await screenshot(page, 'mobile-4-job-review')
-  await page.getByRole('button', { name: 'Generate tailored resume and cover letter' }).tap()
+  await page.getByRole('button', { name: TAILOR_BUTTON }).tap()
 
   // ------------------------------------------------------------ Workspace
-  await expect(heading(page, 'Your tailored draft')).toBeVisible()
-  // One column: coverage is a third tab and there is no side panel.
-  await expect(page.getByRole('complementary', { name: 'Evidence and coverage' })).toHaveCount(0)
+  const generationId = await workspaceOpened(page)
+  // One column: coverage and requirements are tabs and there is no side panel.
+  await expect(page.getByRole('complementary')).toHaveCount(0)
   const tabs = page.getByRole('tablist')
-  await expect(tabs.getByRole('tab')).toHaveText(['Resume', 'Cover letter', 'Coverage'])
+  await expect(tabs.getByRole('tab')).toHaveText(['Resume', 'Cover letter', 'Coverage', 'Requirements'])
   const resume = page.getByRole('tabpanel', { name: 'Resume' })
   await expect(resume.getByRole('heading', { name: 'Jordan Rivera' })).toBeVisible()
   await expectNoHorizontalOverflow(page, 'Workspace, resume tab')
@@ -106,6 +102,26 @@ test('the workflow fits a 375px screen and the workspace uses tabs and a source 
   await page.keyboard.press('Escape')
   await expect(drawer).toBeHidden()
 
+  // The job's requirements are the fourth tab, read-only.
+  await tabs.getByRole('tab', { name: 'Requirements' }).tap()
+  const requirements = page.getByRole('tabpanel', { name: 'Requirements' })
+  await expect(requirements.getByRole('region', { name: /^Required \(\d+\)$/ })).toBeVisible()
+  await expect(requirements.getByRole('textbox')).toHaveCount(0)
+  await expectNoHorizontalOverflow(page, 'Workspace, requirements tab')
+  await screenshot(page, 'mobile-8b-workspace-requirements')
+  await requirements.getByRole('button', { name: /^View source of requirement \d+$/ }).first().tap()
+  await expect(page.getByRole('dialog').getByRole('blockquote')).not.toBeEmpty()
+  await expectNoHorizontalOverflow(page, 'Workspace, requirement source')
+  await page.keyboard.press('Escape')
+
+  // The job's own page, where a new draft can be generated for it.
+  await page.goBack()
+  await expect(heading(page, 'Your target job')).toBeVisible()
+  await expectNoHorizontalOverflow(page, 'Target job, already analyzed')
+  await screenshot(page, 'mobile-4-job-analyzed')
+  await page.goto(`/workspace/${generationId}`)
+  await expect(heading(page, 'Your tailored draft')).toBeVisible()
+
   // The dark theme has the same layout.
   await page.getByRole('button', { name: 'Switch to dark theme' }).tap()
   await tabs.getByRole('tab', { name: 'Resume' }).tap()
@@ -141,11 +157,17 @@ test('text without a break opportunity does not make a 375px screen scroll sidew
   await page.getByRole('button', { name: 'Use sample job' }).tap()
   await page.getByRole('textbox', { name: 'Role title (optional)' }).fill(UNBROKEN)
   await page.getByRole('textbox', { name: 'Company (optional)' }).fill(UNBROKEN)
-  await page.getByRole('button', { name: 'Analyze job' }).tap()
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
-  await expectNoHorizontalOverflow(page, 'Job requirement review with a long title and company')
-  await generateDraft(page)
+  await page.getByRole('button', { name: TAILOR_BUTTON }).tap()
+  await workspaceOpened(page)
   await expect(page.getByText(`Tailored for ${UNBROKEN} at ${UNBROKEN}.`)).toBeVisible()
   await expectNoHorizontalOverflow(page, 'Workspace header with a long job title and company')
   await screenshot(page, 'mobile-11-workspace-long-job-title')
+
+  // The same long names on the job's own page and in the list of drafts.
+  await page.goBack()
+  await expect(heading(page, 'Your target job')).toBeVisible()
+  await expectNoHorizontalOverflow(page, 'Target job with a long title and company')
+  await page.getByRole('link', { name: 'Start a different job' }).tap()
+  await expect(page.getByRole('region', { name: 'Your drafts' }).getByRole('link')).toHaveCount(1)
+  await expectNoHorizontalOverflow(page, 'Target job form with a draft of a long-named job')
 })

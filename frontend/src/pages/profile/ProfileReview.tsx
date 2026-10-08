@@ -166,8 +166,7 @@ export function ProfileReview({ profile }: ProfileReviewProps) {
         title="Review your profile"
         description={
           <p>
-            Everything here was extracted from your sources. Your documents can only use what
-            you confirm on this page, so correct anything that is wrong and add what is missing.
+            Extracted from your sources
           </p>
         }
       />
@@ -197,7 +196,7 @@ export function ProfileReview({ profile }: ProfileReviewProps) {
             label={`${needsReviewCount} ${needsReviewCount === 1 ? 'item needs' : 'items need'} review`}
           />
           <span className="text-muted-foreground">
-            These could not be matched to your sources with certainty. Check them below.
+            Could Not Be Matched to Source. Check Below
           </span>
         </div>
       ) : null}
@@ -235,7 +234,7 @@ export function ProfileReview({ profile }: ProfileReviewProps) {
               </div>
               {records.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Nothing was found in your sources for this section.
+                  No match found in your sources for this section.
                 </p>
               ) : (
                 records.map((record) => (

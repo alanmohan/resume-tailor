@@ -85,7 +85,7 @@ function Entry({ entry, regenerable }: { entry: ResumeEntry; regenerable: boolea
       {/* A role or project without statements; a degree or certificate normally has none. */}
       {entry.bullets.length === 0 && regenerable ? (
         <p className="mt-1 font-sans text-xs text-muted-foreground print:hidden">
-          No statement was generated for this record, so it prints as a heading only. To change
+          No statement was generated for this record, so it appears as a heading only. To change
           that, add detail to it (or remove it) on the Profile step and generate again.
         </p>
       ) : null}

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Printer, type LucideIcon } from 'lucide-react'
+import { Copy, Download, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -16,17 +16,22 @@ import { ClaimStatusBadge } from './ClaimStatusBadge'
 import { DOCUMENT_LABEL, countLabel, type DocumentKind, type LocatedClaim } from './workspaceModel'
 
 /** The two ways a document leaves the app. Both go through the same review. */
-export type ExportAction = 'print' | 'copy'
+export type ExportAction = 'download' | 'copy'
 
 const ACTION_WORDING: Record<ExportAction, { title: string; verb: string; confirm: string; icon: LucideIcon }> = {
-  print: { title: 'Review before printing', verb: 'print', confirm: 'Print anyway', icon: Printer },
+  download: {
+    title: 'Review before downloading',
+    verb: 'download',
+    confirm: 'Download anyway',
+    icon: Download,
+  },
   copy: { title: 'Review before copying', verb: 'copy', confirm: 'Copy anyway', icon: Copy },
 }
 
 interface ExportGateProps {
   /** What the user asked for when the dialog opened. */
   action: ExportAction
-  /** The document about to be printed or copied. */
+  /** The document about to be downloaded or copied. */
   documentKind: DocumentKind
   /** Flagged statements of the whole draft, in reading order. */
   flagged: LocatedClaim[]
@@ -139,7 +144,7 @@ interface ExportGateDialogProps extends ExportGateProps {
 }
 
 /**
- * Shown instead of printing or copying straight away when statements still
+ * Shown instead of downloading or copying straight away when statements still
  * need the user's attention: it lists them, offers to go to each one, and
  * only exports after an explicit acknowledgement.
  */

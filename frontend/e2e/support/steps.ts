@@ -72,8 +72,10 @@ export interface JobText {
   description: string
 }
 
-/** Target job: open the screen from the confirmed profile and analyze a job. */
-export async function analyzeJob(page: Page, job: JobText | 'sample'): Promise<void> {
+export const TAILOR_BUTTON = 'Tailor my resume'
+
+/** Target job: open the screen from the confirmed profile and fill in the form. */
+export async function fillJobForm(page: Page, job: JobText | 'sample'): Promise<void> {
   await page.getByRole('link', { name: 'Continue to target job' }).first().click()
   await expect(heading(page, 'Target job')).toBeVisible()
   if (job === 'sample') {
@@ -83,16 +85,23 @@ export async function analyzeJob(page: Page, job: JobText | 'sample'): Promise<v
     await page.getByRole('textbox', { name: 'Company (optional)' }).fill(job.company ?? '')
     await page.getByRole('textbox', { name: 'Job description' }).fill(job.description)
   }
-  await page.getByRole('button', { name: 'Analyze job' }).click()
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
 }
 
-/** Target job: generate the draft and wait for the workspace. Returns the generation ID. */
-export async function generateDraft(page: Page): Promise<string> {
-  await page.getByRole('button', { name: 'Generate tailored resume and cover letter' }).click()
+/** Wait for the workspace a finished run opens. Returns the generation ID. */
+export async function workspaceOpened(page: Page): Promise<string> {
   await page.waitForURL(/\/workspace\/[^/]+$/)
   await expect(heading(page, 'Your tailored draft')).toBeVisible()
   return generationIdFromUrl(page)
+}
+
+/**
+ * Target job: one submission analyzes the job, writes the draft and opens
+ * the workspace. Returns the generation ID.
+ */
+export async function tailorJob(page: Page, job: JobText | 'sample'): Promise<string> {
+  await fillJobForm(page, job)
+  await page.getByRole('button', { name: TAILOR_BUTTON }).click()
+  return workspaceOpened(page)
 }
 
 export function generationIdFromUrl(page: Page): string {
@@ -103,8 +112,7 @@ export function generationIdFromUrl(page: Page): string {
 export async function reachWorkspaceWithSample(page: Page): Promise<string> {
   await extractSampleProfile(page)
   await confirmProfile(page)
-  await analyzeJob(page, 'sample')
-  return generateDraft(page)
+  return tailorJob(page, 'sample')
 }
 
 // ------------------------------------------------------------- workspace
@@ -130,8 +138,27 @@ export async function editClaim(claim: Locator, text: string): Promise<void> {
   await expect(claim.getByText('Edited - needs revalidation')).toBeVisible()
 }
 
-export async function printCalls(page: Page): Promise<number> {
-  return page.evaluate(() => window.__printCalls)
+/**
+ * Click "Download PDF" (or the dialog button that confirms it) and check the
+ * file the browser receives: its name, that it is a PDF and that it is not
+ * an empty shell. Returns the file's bytes.
+ */
+export async function expectPdfDownload(page: Page, trigger: Locator, fileName: string): Promise<Buffer> {
+  const [download] = await Promise.all([page.waitForEvent('download'), trigger.click()])
+  expect(download.suggestedFilename()).toBe(fileName)
+  const bytes = fs.readFileSync(await download.path())
+  expect(bytes.subarray(0, 4).toString('latin1')).toBe('%PDF')
+  expect(bytes.length).toBeGreaterThan(2_000)
+  return bytes
+}
+
+/** Count the files the page hands to the browser from now on. */
+export function countDownloads(page: Page): () => number {
+  let downloads = 0
+  page.on('download', () => {
+    downloads += 1
+  })
+  return () => downloads
 }
 
 // ----------------------------------------------------------- session/API

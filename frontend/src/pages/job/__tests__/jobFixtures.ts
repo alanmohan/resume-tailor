@@ -2,7 +2,6 @@ import type {
   Generation,
   GenerationSummary,
   Job,
-  JobSummary,
   Profile,
   Requirement,
 } from '@/lib/types'
@@ -81,18 +80,6 @@ export function makeJob(overrides: Partial<Job> = {}): Job {
     updated_at: '2026-10-07T12:00:00.000Z',
     expires_at: futureIso(),
     ...overrides,
-  }
-}
-
-export function summaryOf(job: Job): JobSummary {
-  return {
-    job_id: job.job_id,
-    title: job.title,
-    company: job.company,
-    version: job.version,
-    requirement_count: job.requirements.length,
-    created_at: job.created_at,
-    updated_at: job.updated_at,
   }
 }
 

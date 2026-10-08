@@ -56,10 +56,3 @@ export function requirement(requirementId: string) {
   if (!row) throw new Error(`No requirement row for "${requirementId}" is rendered`)
   return within(row)
 }
-
-/** Replace `window.print` (which the test environment does not implement) with a spy. */
-export function stubPrint() {
-  const print = vi.fn()
-  vi.stubGlobal('print', print)
-  return print
-}

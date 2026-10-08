@@ -260,14 +260,6 @@ export interface Requirement {
   user_edited: boolean
 }
 
-/** requirement_id is null for a requirement the user just added. */
-export interface RequirementInput {
-  requirement_id: string | null
-  text: string
-  category: RequirementCategory
-  importance: RequirementImportance
-}
-
 export interface Job {
   job_id: string
   version: number
@@ -291,6 +283,7 @@ export interface JobSummary {
   updated_at: IsoDateString
 }
 
+/** GET /api/jobs. The app itself no longer lists jobs; the end-to-end tests read it. */
 export interface JobListResponse {
   jobs: JobSummary[]
 }
@@ -299,13 +292,6 @@ export interface JobCreateRequest {
   description: string
   company?: string | null
   title?: string | null
-}
-
-export interface JobPatchRequest {
-  expected_version: number
-  company?: string | null
-  title?: string | null
-  requirements: RequirementInput[]
 }
 
 // ----------------------------------------------------------- generations

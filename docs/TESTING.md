@@ -119,8 +119,8 @@ Open <http://127.0.0.1:5173>. The API allows exactly `http://127.0.0.1:5173` and
 
 1. Start: tick the acknowledgement, choose "Try sample profile" (fictional data), submit.
 2. Profile review: one conflict (two start dates for the same role) must be resolved or dismissed; then Confirm. The page shows real embedding counts while indexing.
-3. Target job: use the sample job or paste one; review the requirements; Generate.
-4. Workspace: open evidence badges, edit a statement, Revalidate, regenerate one statement, correct a coverage status, Copy, Print / Save as PDF.
+3. Target job: use the sample job or paste one, then "Tailor my resume". The job is analyzed and the draft written in one run (a two-step progress list shows which step is running), and the workspace opens.
+4. Workspace: open evidence badges, edit a statement, Revalidate, regenerate one statement, correct a coverage status, read the job's requirements in the Requirements tab, Copy, Download PDF.
 5. "Clear my data" in the header deletes everything.
 
 In demo mode a "Demo mode" banner is shown on every screen and the generated text is assembled from your own evidence sentences rather than written by a model.
@@ -257,22 +257,22 @@ Playwright starts its own isolated services and stops them afterwards:
   backend/.venv/bin/python -c "from pymongo import MongoClient; MongoClient('mongodb://127.0.0.1:27017').drop_database('resume_tailor_test_e2e')"
   ```
 
-- Browser: Chromium only. Each test fails if the page throws an uncaught error or logs an unexpected console error. `window.print` is replaced by a counter, because a real print dialog would block a headless browser. The print stylesheet is checked through print-media emulation, and the long-resume spec also has Chromium produce a PDF and checks that it has at least two pages and contains fonts (real text, not an image).
+- Browser: Chromium only. Each test fails if the page throws an uncaught error or logs an unexpected console error. The Download PDF button is checked with a real browser download: the suggested file name, that the file starts with `%PDF` and is not trivially small, and for the long resume that it has at least two pages and contains fonts (real text, not an image). The print stylesheet, which now only serves a user who prints from the browser, is checked through print-media emulation, and the long-resume spec also has Chromium produce a PDF of it.
 - Reports: `playwright-report/` (HTML) and `test-results/` (traces and screenshots of failures). Both are git-ignored.
 
 Specs at the time of writing:
 
 | Spec | What it covers |
 |---|---|
-| `critical-path.spec.ts` | The whole workflow with the sample profile: input, profile review, job analysis, generation, citations, editing, revalidation, print, clear data |
-| `workspace-review.spec.ts` | A dishonest edit is flagged after revalidation and gates printing; regeneration, a coverage correction and Copy; a profile edit marks the draft out of date |
-| `failures.spec.ts` | Provider timeout during extraction keeps the text and Retry succeeds; a rate-limited generation is retried with the same idempotency key; a session ending mid-flow is explained; a double click sends one request |
+| `critical-path.spec.ts` | The whole workflow with the sample profile: input, profile review, one-step tailoring (job analysis and generation from one button), citations, the read-only Requirements tab, editing, revalidation, PDF download of both documents, browser print layout, clear data |
+| `workspace-review.spec.ts` | A dishonest edit is flagged after revalidation and gates the PDF download (and browser printing); regeneration, a coverage correction and Copy; a profile edit marks the draft out of date, and "Generate a new draft" writes a new one for the same job without a second job analysis |
+| `failures.spec.ts` | Provider timeout during extraction keeps the text and Retry succeeds; a generation that fails after the job was analyzed is retried with the same idempotency key and without a second job analysis; a session ending mid-flow is explained; a double click sends one request |
 | `isolation.spec.ts` | A second browser session cannot see or reach the first one's data, in the app or through the API |
 | `deep-links.spec.ts` | Every screen survives a refresh; unknown addresses and links without a session are handled |
 | `escaping.spec.ts` | Script and image markup in pasted text is displayed as text on every screen and never executed |
 | `keyboard.spec.ts` | Start, the clear-data dialog and an evidence item operated with the keyboard alone, with visible focus |
 | `mobile.spec.ts` | The workflow at 375 x 812 with no sideways scrolling; workspace tabs and the evidence sheet |
-| `print-long-document.spec.ts` | A resume with sixteen roles prints as one unclipped column over at least two pages |
+| `print-long-document.spec.ts` | A resume with sixteen roles downloads as a PDF of at least two pages, and prints from the browser as one unclipped column over at least two pages |
 
 The suite was still being written while this document was prepared; the list above is what existed then. Its pass or fail status is not recorded here. See [section 13](#13-not-verified).
 
@@ -420,7 +420,7 @@ The eleven items are the "Required meaningful tests" of the specification (secti
 
 | # | Specification item | Backend tests | Frontend unit tests | End-to-end specs |
 |---|---|---|---|---|
-| 1 | Ingest, edit and confirm profile, index, analyse job, generate, inspect evidence, edit and revalidate, print, clear data | `integration/test_full_flow.py`, `test_profile_flow.py`, `test_generation_create.py` | `pages/start`, `pages/profile`, `pages/job/__tests__`, `pages/workspace/__tests__` | `critical-path.spec.ts` |
+| 1 | Ingest, edit and confirm profile, index, analyse job, generate, inspect evidence, edit and revalidate, export (Download PDF), clear data | `integration/test_full_flow.py`, `test_profile_flow.py`, `test_generation_create.py` | `pages/start`, `pages/profile`, `pages/job/__tests__`, `pages/workspace/__tests__` | `critical-path.spec.ts` |
 | 2 | Job asks for Kubernetes, profile mentions Docker only | `integration/test_fixture_grounding.py`, `test_generation_grounding.py`, `test_generation_editing.py`; `unit/test_validation_claims.py`, `test_coverage_rules.py` | | `workspace-review.spec.ts` (a skill that is not in the profile, added by hand, is flagged) |
 | 3 | Unrelated 20% metric is not reused | `integration/test_fixture_grounding.py`, `test_generation_grounding.py`; `unit/test_validation_claims.py`, `test_generation_compose.py`, `test_coverage_rules.py` | | |
 | 4 | Hidden instructions cannot override grounding or reach other profiles | `integration/test_fixture_grounding.py`, `test_ingest_api.py`, `test_job_api.py`, `test_generation_grounding.py`; `unit/test_ingest_openai_ops.py`, `test_generation_openai_ops.py`, `test_ingest_instruction_guard.py` | | |
@@ -429,7 +429,7 @@ The eleven items are the "Required meaningful tests" of the specification (secti
 | 7 | Profile edits mark drafts stale; validation status changes after document edits | `integration/test_generation_create.py`, `test_generation_editing.py`; `unit/test_generation_compose.py` | `pages/workspace/__tests__/WorkspacePage.states.test.tsx`, `documents.test.tsx`, `workspaceModel.test.ts` | `workspace-review.spec.ts` |
 | 8 | Empty and long input, invalid schema, provider timeout and 429, database failure, duplicate generation, zero coverage denominator, no evidence | `integration/test_ingest_api.py`, `test_job_api.py`, `test_errors.py`, `test_failure_recovery.py`, `test_generation_failures.py`, `test_generation_create.py`, `test_index_confirm_api.py`, `test_cors_and_body_limit.py`, `test_health.py`, `test_rate_limits.py`; `unit/test_coverage_rules.py`, `test_retrieval_ranking.py`, `test_openai_client.py` | `pages/start/StartPage.test.tsx`, `startForm.test.ts`, `pages/job/__tests__/JobPage.test.tsx`, `jobFormSchema.test.ts`, `generateDraft.test.ts`, `lib/api.test.ts` | `failures.spec.ts` |
 | 9 | Records survive a restart; clearing data stops in-flight work from writing them back | `integration/test_full_flow.py`, `test_profile_flow.py`, `test_generation_failures.py`, `test_failure_recovery.py`, `test_ingest_api.py`, `test_index_confirm_api.py`, `test_job_api.py`, `test_clear_data.py`, `test_errors.py` | | |
-| 10 | Mobile 375 px, keyboard only, deep-link refresh, source-text escaping, multi-page print | `integration/test_plain_text_and_headers.py` (server half of escaping) | `components/app/components.test.tsx`, `pages/workspace/__tests__/documents.test.tsx`, `panels.test.tsx`, `pages/job/__tests__/JobPage.test.tsx` (markup rendered as text; print target; print gate) | `mobile.spec.ts`, `keyboard.spec.ts`, `deep-links.spec.ts`, `escaping.spec.ts`, `print-long-document.spec.ts` |
+| 10 | Mobile 375 px, keyboard only, deep-link refresh, source-text escaping, multi-page export | `integration/test_plain_text_and_headers.py` (server half of escaping) | `components/app/components.test.tsx`, `pages/workspace/__tests__/documents.test.tsx`, `panels.test.tsx`, `pages/job/__tests__/ExistingJob.test.tsx`, `pages/workspace/__tests__/pdfDocument.test.ts` (markup rendered as text; PDF layout, page breaks and file names; download gate; browser-print target) | `mobile.spec.ts`, `keyboard.spec.ts`, `deep-links.spec.ts`, `escaping.spec.ts`, `print-long-document.spec.ts` |
 | 11 | Optional features | none built, so nothing to test | | |
 
 Limits of what these tests show, from `backend/tests/TEST_MATRIX.md` and from reading the tests:
@@ -439,7 +439,7 @@ Limits of what these tests show, from `backend/tests/TEST_MATRIX.md` and from re
 - MongoDB's TTL deletion is not waited for. The tests check that the TTL indexes exist and that the application refuses expired sessions itself.
 - Backend tests exercise the OpenAI provider only through a stubbed SDK object. Real model behaviour is covered only by the opt-in smoke test.
 - Frontend unit tests mock `fetch`; only the Playwright suite runs the frontend against the real API (with the fake provider).
-- Print is checked through print-media emulation, layout measurements and the page count of a PDF made by headless Chromium. Nobody has looked at where the page breaks fall; do that by hand in the browser's print preview.
+- The downloaded PDF is checked for its file name, its `%PDF` header, its size, its page count and the presence of fonts; the unit tests check the layout (order of lines, margins, wrapping, page breaks). Nobody has looked at a downloaded file with their eyes in these tests; open one and read it. Browser printing is checked through print-media emulation, layout measurements and the page count of a PDF made by headless Chromium.
 
 ## 13. Not verified
 

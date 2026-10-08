@@ -3,9 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Sparkles } from 'lucide-react'
 import { useForm, useWatch } from 'react-hook-form'
-import { useNavigate } from 'react-router'
-import { toast } from 'sonner'
-import { CharCounter, ErrorAlert, LoadingBlock, PageHeader } from '@/components/app'
+import { CharCounter, ErrorAlert, PageHeader } from '@/components/app'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -14,9 +12,9 @@ import { createJob } from '@/lib/api'
 import { fieldErrorMap, isApiError } from '@/lib/errors'
 import { isProfileReady, useProviderMode, useSession } from '@/lib/hooks'
 import { queryKeys } from '@/lib/queryKeys'
-import type { JobSummary, Profile } from '@/lib/types'
+import type { Job, Profile } from '@/lib/types'
 import { SAMPLE_JOB } from '@/sample/sampleData'
-import { EarlierJobs } from './EarlierJobs'
+import { DraftList } from './DraftList'
 import {
   EMPTY_JOB_FORM,
   buildJobSchema,
@@ -24,24 +22,28 @@ import {
   toJobCreateRequest,
   type JobFormValues,
 } from './jobFormSchema'
-import { jobPath } from './jobRoutes'
 import { ProfileNotReadyAlert } from './ProfileNotReadyAlert'
+import { ANALYZE_STEP_LABEL, GENERATE_STEP_LABEL, RunProgress, type RunStep } from './RunProgress'
 
 interface JobFormProps {
   profile: Profile
-  /** Jobs analyzed earlier in this session, offered below the form. */
-  earlierJobs: JobSummary[]
+  /** Step 1 is done: the job is stored. The page goes on to step 2 with it. */
+  onAnalyzed: (job: Job) => void
 }
 
 const optionalHint = <span className="font-normal text-muted-foreground">(optional)</span>
 
-/** Paste a job description and have its requirements extracted. */
-export function JobForm({ profile, earlierJobs }: JobFormProps) {
+/**
+ * Paste a job description and tailor the resume to it in one go. This form
+ * runs step 1 (the job analysis) and hands the stored job to the page, which
+ * runs step 2 (writing the documents).
+ */
+export function JobForm({ profile, onAnalyzed }: JobFormProps) {
   const { limits } = useSession()
   const providerMode = useProviderMode()
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
   const [sampleLoaded, setSampleLoaded] = useState(false)
+  const profileReady = isProfileReady(profile)
 
   const resolver = useMemo(
     () => zodResolver(buildJobSchema(limits.max_job_chars)),
@@ -53,11 +55,8 @@ export function JobForm({ profile, earlierJobs }: JobFormProps) {
 
   const analyze = useMutation({
     mutationFn: (values: JobFormValues) => createJob(toJobCreateRequest(values)),
-    onSuccess: (job) => {
-      queryClient.setQueryData(queryKeys.job(job.job_id), job)
-      // Only the list is out of date; the job itself was just stored above.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs, exact: true })
-    },
+    // The next screens read the job from the cache instead of asking for it again.
+    onSuccess: (job) => queryClient.setQueryData(queryKeys.job(job.job_id), job),
     onError: (error) => {
       // Put the API's field errors next to the fields they belong to.
       for (const [path, message] of Object.entries(fieldErrorMap(error))) {
@@ -66,16 +65,22 @@ export function JobForm({ profile, earlierJobs }: JobFormProps) {
     },
   })
 
-  const submit = form.handleSubmit((values) =>
-    analyze.mutate(values, {
-      // Runs only while this form is still on screen, so a user who moved on
-      // during the analysis is not pulled back here.
-      onSuccess: (job) => {
-        toast.success('Job description analyzed')
-        void navigate(jobPath(job.job_id), { replace: true })
-      },
-    }),
-  )
+  const submit = form.handleSubmit((values) => {
+    // Pressing Enter in a field submits the form even while the button is disabled.
+    if (!profileReady || analyze.isPending) return
+    // onSuccess runs only while this form is still on screen, so a user who
+    // moved on during the analysis does not start a generation by surprise.
+    analyze.mutate(values, { onSuccess: onAnalyzed })
+  })
+
+  // Shown from the first submission on. A finished analysis leaves this form.
+  const steps: RunStep[] =
+    analyze.isPending || analyze.isError
+      ? [
+          { label: ANALYZE_STEP_LABEL, status: analyze.isPending ? 'running' : 'failed' },
+          { label: GENERATE_STEP_LABEL, status: 'waiting' },
+        ]
+      : []
 
   function fillSample() {
     // reset() replaces all three values and clears earlier validation messages.
@@ -93,13 +98,13 @@ export function JobForm({ profile, earlierJobs }: JobFormProps) {
         title="Target job"
         description={
           <p>
-            Paste the posting you want to apply for. Its requirements are extracted for you to
-            review and correct before any document is generated.
+            Paste the posting you want to apply for. Its requirements are extracted, then your
+            resume and cover letter are written for it from your confirmed profile.
           </p>
         }
       />
 
-      {isProfileReady(profile) ? null : <ProfileNotReadyAlert profile={profile} />}
+      {profileReady ? null : <ProfileNotReadyAlert profile={profile} />}
 
       <form onSubmit={(event) => void submit(event)} noValidate className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -176,6 +181,8 @@ export function JobForm({ profile, earlierJobs }: JobFormProps) {
           </Field>
         </fieldset>
 
+        <RunProgress steps={steps} />
+
         {analyze.isError ? (
           <ErrorAlert
             error={analyze.error}
@@ -185,14 +192,22 @@ export function JobForm({ profile, earlierJobs }: JobFormProps) {
           />
         ) : null}
 
-        {analyze.isPending ? <LoadingBlock label="Analyzing job description..." lines={2} /> : null}
-
-        <Button type="submit" size="lg" disabled={analyze.isPending}>
-          {analyze.isPending ? 'Analyzing...' : 'Analyze job'}
+        <Button
+          type="submit"
+          size="lg"
+          disabled={analyze.isPending || !profileReady}
+          aria-describedby={profileReady ? undefined : 'tailor-blocked'}
+        >
+          {analyze.isPending ? 'Tailoring...' : 'Tailor my resume'}
         </Button>
+        {profileReady ? null : (
+          <p id="tailor-blocked" className="text-sm text-muted-foreground">
+            Tailoring is unavailable until your profile is confirmed and indexed.
+          </p>
+        )}
       </form>
 
-      <EarlierJobs jobs={earlierJobs} />
+      <DraftList />
     </div>
   )
 }

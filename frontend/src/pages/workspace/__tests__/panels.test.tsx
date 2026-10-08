@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { errorResponse, jsonResponse } from '@/test/mockApi'
+import { makeJob, makeRequirement, sourceSpan } from '@/pages/job/__tests__/jobFixtures'
 import {
   GENERATION_ID,
   makeCoverageItem,
@@ -23,7 +24,7 @@ const DRAFT = `/api/generations/${GENERATION_ID}`
 
 /** The right-hand panel of the two-pane layout. */
 function sidePanel() {
-  return within(screen.getByRole('complementary', { name: 'Evidence and coverage' }))
+  return within(screen.getByRole('complementary', { name: 'Evidence, coverage and requirements' }))
 }
 
 describe('Workspace evidence panel (two panes)', () => {
@@ -352,10 +353,138 @@ describe('Workspace coverage panel (two panes)', () => {
   })
 })
 
+describe('Workspace requirements panel (two panes)', () => {
+  const JOB = '/api/jobs/job-1'
+
+  beforeEach(() => {
+    stubWideScreen()
+  })
+
+  async function openRequirementsTab(user: ReturnType<typeof openWorkspace>['user']) {
+    await draftIsShown()
+    await user.click(sidePanel().getByRole('tab', { name: 'Requirements' }))
+  }
+
+  it('lists the requirements of the draft\'s job read-only, grouped by importance', async () => {
+    const { requests, user } = openWorkspace(makeGeneration(), {
+      [`GET ${JOB}`]: jsonResponse(makeJob()),
+    })
+    await draftIsShown()
+    // The job is only loaded when its tab is opened.
+    expect(requests.some((request) => request.path === JOB)).toBe(false)
+
+    await user.click(sidePanel().getByRole('tab', { name: 'Requirements' }))
+
+    const required = within(await sidePanel().findByRole('region', { name: 'Required (2)' }))
+    expect(required.getAllByRole('listitem').map((item) => item.querySelector('p')?.textContent)).toEqual([
+      'Strong Python skills',
+      'Experience with Docker',
+    ])
+    expect(required.getAllByText('Skill')).toHaveLength(2)
+    expect(required.queryByText('Inferred')).toBeNull()
+
+    const preferred = within(sidePanel().getByRole('region', { name: 'Preferred (2)' }))
+    const items = preferred.getAllByRole('listitem')
+    expect(within(items[0]).getByText('Experience with AWS')).toBeInTheDocument()
+    expect(within(items[1]).getByText('Comfortable working with support teams')).toBeInTheDocument()
+    expect(within(items[1]).getByText('Responsibility')).toBeInTheDocument()
+    // Only the requirement that is not stated in the posting is marked, with its explanation.
+    const inferred = within(items[1]).getByRole('button', { name: 'Inferred' })
+    expect(preferred.getAllByText('Inferred')).toHaveLength(1)
+    await user.hover(inferred)
+    expect(
+      (await screen.findAllByText(/Not stated explicitly in the posting/)).length,
+    ).toBeGreaterThan(0)
+
+    // Read-only: nothing to type into, and no edit, add or remove controls.
+    const panel = sidePanel().getByRole('tabpanel', { name: 'Requirements' })
+    expect(within(panel).queryAllByRole('textbox')).toHaveLength(0)
+    expect(within(panel).queryAllByRole('combobox')).toHaveLength(0)
+    expect(within(panel).queryByRole('button', { name: /edit|add|remove|save|correct/i })).toBeNull()
+    expect(requests.filter((request) => request.method !== 'GET')).toHaveLength(0)
+  })
+
+  it('shows the passage of the job description a requirement was taken from', async () => {
+    const { user } = openWorkspace(makeGeneration(), { [`GET ${JOB}`]: jsonResponse(makeJob()) })
+    await openRequirementsTab(user)
+
+    await user.click(await sidePanel().findByRole('button', { name: 'View source of requirement 1' }))
+
+    expect(
+      await screen.findByText('Strong Python skills and experience building REST APIs'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Source: Job description')).toBeInTheDocument()
+    // The inferred requirement has no passage to show.
+    expect(sidePanel().queryByRole('button', { name: 'View source of requirement 4' })).toBeNull()
+  })
+
+  it('renders HTML in the job text as plain text, never as markup', async () => {
+    const description = 'Intro\n<img src="x" onerror="window.__reqXss = 1">\nEnd'
+    const job = makeJob({
+      description,
+      requirements: [
+        makeRequirement({
+          requirement_id: 'req-x',
+          text: 'Knows <b>HTML</b> & <script>window.__reqXss = 2</script>',
+          source_span: sourceSpan('<img src="x" onerror="window.__reqXss = 1">', description),
+        }),
+      ],
+    })
+    const { user } = openWorkspace(makeGeneration(), { [`GET ${JOB}`]: jsonResponse(job) })
+    await openRequirementsTab(user)
+
+    expect(
+      await sidePanel().findByText('Knows <b>HTML</b> & <script>window.__reqXss = 2</script>'),
+    ).toBeInTheDocument()
+    expect(sidePanel().getByRole('region', { name: 'Preferred (0)' })).toHaveTextContent('None.')
+    await user.click(sidePanel().getByRole('button', { name: 'View source of requirement 1' }))
+    expect(
+      await screen.findByText('<img src="x" onerror="window.__reqXss = 1">'),
+    ).toBeInTheDocument()
+
+    expect(document.body.querySelector('img, script, b')).toBeNull()
+    expect('__reqXss' in window).toBe(false)
+  })
+
+  it('offers Retry when the job cannot be loaded', async () => {
+    let attempts = 0
+    const { user } = openWorkspace(makeGeneration(), {
+      [`GET ${JOB}`]: () => {
+        attempts += 1
+        return attempts === 1
+          ? errorResponse(503, 'database_unavailable', 'The database is unavailable.')
+          : jsonResponse(makeJob())
+      },
+    })
+    await openRequirementsTab(user)
+
+    const alert = await sidePanel().findByRole('alert')
+    expect(alert).toHaveTextContent('The job requirements could not be loaded')
+    expect(alert).toHaveTextContent('The database is unavailable.')
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }))
+
+    expect(await sidePanel().findByRole('region', { name: 'Required (2)' })).toBeInTheDocument()
+  })
+
+  it('says so when the job no longer exists', async () => {
+    // No route for the job: the mocked API answers 404 not_found.
+    const { user } = openWorkspace()
+    await openRequirementsTab(user)
+
+    expect(
+      await sidePanel().findByText(/The job this draft was written for is no longer available/),
+    ).toBeInTheDocument()
+    expect(sidePanel().queryByRole('button', { name: 'Retry' })).toBeNull()
+    // The other tabs are unaffected.
+    await user.click(sidePanel().getByRole('tab', { name: 'Coverage' }))
+    expect(sidePanel().getByText('50%')).toBeInTheDocument()
+  })
+})
+
 // The shared test setup reports that no media query matches, which is the
 // single-column layout used on phones.
 describe('Workspace on a narrow screen', () => {
-  it('offers Resume, Cover letter and Coverage as tabs and has no side panel', async () => {
+  it('offers Resume, Cover letter, Coverage and Requirements as tabs and has no side panel', async () => {
     const { user } = openWorkspace()
     await draftIsShown()
 
@@ -363,9 +492,10 @@ describe('Workspace on a narrow screen', () => {
       'Resume',
       'Cover letter',
       'Coverage',
+      'Requirements',
     ])
     expect(screen.queryByRole('complementary')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Coverage' }))
 
@@ -373,8 +503,8 @@ describe('Workspace on a narrow screen', () => {
     expect(coverage.getByRole('heading', { name: 'Evidence coverage' })).toBeVisible()
     expect(coverage.getByText('50%')).toBeInTheDocument()
     expect(claimElement('b-1')).not.toBeVisible()
-    // Copy and Print belong to a document, so they are not offered on this tab.
-    expect(screen.queryByRole('button', { name: 'Print / Save as PDF' })).toBeNull()
+    // Copy and Download PDF belong to a document, so they are not offered on this tab.
+    expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull()
   })
 
   it('keeps the last viewed document as the print target while Coverage is shown', async () => {
@@ -387,6 +517,22 @@ describe('Workspace on a narrow screen', () => {
     expect(claimElement('cl-2')).not.toBeVisible()
     expect(claimElement('cl-2').closest('.ws-document-panel')).toHaveAttribute('data-print-target', 'true')
     expect(claimElement('b-1').closest('.ws-document-panel')).toHaveAttribute('data-print-target', 'false')
+  })
+
+  it('shows the job requirements in their own tab', async () => {
+    const { user } = openWorkspace(makeGeneration(), {
+      'GET /api/jobs/job-1': jsonResponse(makeJob()),
+    })
+    await draftIsShown()
+
+    await user.click(screen.getByRole('tab', { name: 'Requirements' }))
+
+    const panel = within(screen.getByRole('tabpanel', { name: 'Requirements' }))
+    expect(await panel.findByRole('region', { name: 'Required (2)' })).toBeInTheDocument()
+    expect(panel.getByText('Experience with AWS')).toBeInTheDocument()
+    expect(panel.queryAllByRole('textbox')).toHaveLength(0)
+    expect(claimElement('b-1')).not.toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Download PDF' })).toBeNull()
   })
 
   it('opens evidence in a sheet and returns to the badge when it closes', async () => {

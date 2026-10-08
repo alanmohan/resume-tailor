@@ -8,10 +8,11 @@ import { API_URL } from './support/env.ts'
 import { SECOND_PERSON } from './support/data.ts'
 import {
   ACKNOWLEDGEMENT,
-  analyzeJob,
+  TAILOR_BUTTON,
   apiGet,
   confirmProfile,
   extractSampleProfile,
+  fillJobForm,
   heading,
   injectedApiError,
   requireToken,
@@ -67,7 +68,7 @@ test('a provider timeout during extraction keeps the pasted text and Retry succe
   expect(attempts).toBe(2)
 })
 
-test('a rate-limited generation is retried with the same idempotency key', async ({ page, request }) => {
+test('a generation that fails is retried with the same idempotency key, without a second job analysis', async ({ page, request }) => {
   const keys: (string | undefined)[] = []
   await page.route(`${API_URL}/api/generations`, async (route) => {
     if (route.request().method() !== 'POST') return route.continue()
@@ -81,16 +82,23 @@ test('a rate-limited generation is retried with the same idempotency key', async
     }
   })
 
+  const analyses = recordRequests(page, 'POST', '/api/jobs')
+
   await extractSampleProfile(page)
   await confirmProfile(page)
-  await analyzeJob(page, 'sample')
-  await page.getByRole('button', { name: 'Generate tailored resume and cover letter' }).click()
+  await fillJobForm(page, 'sample')
+  await page.getByRole('button', { name: TAILOR_BUTTON }).click()
 
   const alert = page.getByRole('alert').filter({ hasText: 'The draft was not generated' })
   await expect(alert).toContainText('The AI provider is busy. Please try again shortly.')
-  // The reviewed job is still there, untouched.
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
-  await expect(page.locator('#job-action-status')).toHaveText('All changes are saved.')
+  // The job was analyzed and is kept; only the second step failed.
+  await expect(heading(page, 'Your target job')).toBeVisible()
+  await expect(page).toHaveURL(/\/job\?job=[^&]+$/)
+  const steps = page.getByRole('status', { name: 'Progress' }).getByRole('listitem')
+  await expect(steps).toHaveText([
+    /1\. Analyzing the job description\s*Done/,
+    /2\. Writing your resume and cover letter\s*Failed/,
+  ])
 
   await alert.getByRole('button', { name: 'Retry' }).click()
 
@@ -99,6 +107,8 @@ test('a rate-limited generation is retried with the same idempotency key', async
   expect(keys).toHaveLength(2)
   expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/)
   expect(keys[1]).toBe(keys[0])
+  // Retry repeated the generation only: the job was not analyzed (and paid for) again.
+  expect(analyses).toHaveLength(1)
 
   // One draft exists on the server for that key: the retry did not create a second one.
   const token = await requireToken(page)
@@ -154,11 +164,10 @@ test('double-clicking a submit button sends one request', async ({ page }) => {
   await confirmProfile(page)
   await page.getByRole('link', { name: 'Continue to target job' }).first().click()
   await page.getByRole('button', { name: 'Use sample job' }).click()
-  await page.getByRole('button', { name: 'Analyze job' }).dblclick()
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
-  expect(analyses).toHaveLength(1)
-
-  await page.getByRole('button', { name: 'Generate tailored resume and cover letter' }).dblclick()
+  await page.getByRole('button', { name: TAILOR_BUTTON }).dblclick()
+  // While the run is in progress its step list is on screen and the button is off.
+  await expect(page.getByRole('status', { name: 'Progress' }).getByRole('listitem')).toHaveCount(2)
   await expect(heading(page, 'Your tailored draft')).toBeVisible()
+  expect(analyses).toHaveLength(1)
   expect(generations).toHaveLength(1)
 })

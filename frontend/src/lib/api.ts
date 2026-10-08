@@ -17,8 +17,6 @@ import type {
   HealthStatus,
   Job,
   JobCreateRequest,
-  JobListResponse,
-  JobPatchRequest,
   Profile,
   ProfilePatchRequest,
   ReadyStatus,
@@ -257,16 +255,8 @@ export function createJob(body: JobCreateRequest): Promise<Job> {
   return request<Job>('POST', '/api/jobs', { body })
 }
 
-export function listJobs(): Promise<JobListResponse> {
-  return request<JobListResponse>('GET', '/api/jobs')
-}
-
 export function getJob(jobId: string): Promise<Job> {
   return request<Job>('GET', `/api/jobs/${encodeURIComponent(jobId)}`)
-}
-
-export function updateJob(jobId: string, body: JobPatchRequest): Promise<Job> {
-  return request<Job>('PATCH', `/api/jobs/${encodeURIComponent(jobId)}`, { body })
 }
 
 // ----------------------------------------------------------- generations

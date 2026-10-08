@@ -2,15 +2,18 @@
  * Deep links: every screen can be opened by its address and survives a
  * refresh in the same tab, and addresses that lead nowhere say so.
  */
+import type { Generation } from '../src/lib/types.ts'
 import {
+  apiGet,
   extractSampleProfile,
   heading,
   reachWorkspaceWithSample,
+  requireToken,
   storedSession,
 } from './support/steps.ts'
 import { expect, test } from './support/test.ts'
 
-test('every screen survives a refresh in the same tab', async ({ page }) => {
+test('every screen survives a refresh in the same tab', async ({ page, request }) => {
   const generationId = await reachWorkspaceWithSample(page)
   const workspacePath = `/workspace/${generationId}`
   const session = await storedSession(page)
@@ -29,14 +32,29 @@ test('every screen survives a refresh in the same tab', async ({ page }) => {
     page.getByRole('group', { name: 'Machine Learning Engineer at Brightloom Labs' }),
   ).toBeVisible()
 
+  // The form for a new job, with the existing draft listed under it.
   await page.goto('/job')
   await page.reload()
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Role title' })).toHaveValue(
-    'Applied Machine Learning Engineer',
-  )
-  const drafts = page.getByRole('region', { name: 'Drafts for this job' })
+  await expect(heading(page, 'Target job')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Job description' })).toHaveValue('')
+  const drafts = page.getByRole('region', { name: 'Your drafts' })
   await expect(drafts.getByRole('link', { name: /^Draft from/ })).toHaveAttribute('href', workspacePath)
+  await expect(drafts.getByText('Applied Machine Learning Engineer at', { exact: false })).toBeVisible()
+
+  // The draft's own job by its address: read-only, with its draft listed.
+  const response = await apiGet(request, await requireToken(page), `/api/generations/${generationId}`)
+  const generation = (await response.json()) as Generation
+  await page.goto(`/job?job=${generation.job_id}`)
+  await page.reload()
+  await expect(heading(page, 'Your target job')).toBeVisible()
+  const details = page.getByRole('region', { name: 'Job details' })
+  await expect(details.getByText('Applied Machine Learning Engineer', { exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByRole('textbox')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Generate a new draft' })).toBeEnabled()
+  await expect(
+    page.getByRole('region', { name: 'Drafts for this job' }).getByRole('link', { name: /^Draft from/ }),
+  ).toHaveAttribute('href', workspacePath)
+  await expect(page.getByRole('link', { name: 'Start a different job' })).toHaveAttribute('href', '/job')
 
   // The same session throughout, and the step navigation still knows the draft.
   expect(await storedSession(page)).toEqual(session)

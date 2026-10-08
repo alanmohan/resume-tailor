@@ -3,17 +3,16 @@
  * evidence item are operated with Tab, Shift+Tab, Space, Enter and Escape
  * only; focus has to be visible and has to come back to a sensible place.
  *
- * The steps between those three (confirming the profile, analyzing the job,
- * generating) use the shared helpers, which click.
+ * The steps between those three (confirming the profile, tailoring for the
+ * job) use the shared helpers, which click.
  */
 import {
   ACKNOWLEDGEMENT,
-  analyzeJob,
   confirmProfile,
   expectVisibleFocus,
-  generateDraft,
   heading,
   tabTo,
+  tailorJob,
 } from './support/steps.ts'
 import { expect, test } from './support/test.ts'
 
@@ -77,10 +76,8 @@ test('Start, the clear-data dialog and an evidence item work with the keyboard a
 
   // ------------------------------------------------- Evidence (two panes)
   await confirmProfile(page)
-  await analyzeJob(page, 'sample')
-  // The review replaced the form: focus follows to the new screen here too.
-  await expect(page.getByRole('main')).toBeFocused()
-  await generateDraft(page)
+  await tailorJob(page, 'sample')
+  // The workspace replaced the form: focus follows to the new screen here too.
   await expect(page.getByRole('main')).toBeFocused()
 
   const resume = page.getByRole('tabpanel', { name: 'Resume' })
@@ -89,7 +86,7 @@ test('Start, the clear-data dialog and an evidence item work with the keyboard a
   await expectVisibleFocus(page)
   await page.keyboard.press('Enter')
 
-  const sidePanel = page.getByRole('complementary', { name: 'Evidence and coverage' })
+  const sidePanel = page.getByRole('complementary', { name: 'Evidence, coverage and requirements' })
   await expect(badge).toHaveAttribute('aria-pressed', 'true')
   await expect(sidePanel.getByRole('heading', { name: /^Evidence \d+$/ })).toBeVisible()
   await expect(sidePanel.getByRole('blockquote')).not.toBeEmpty()

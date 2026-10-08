@@ -15,7 +15,7 @@ import {
   type Routes as ApiRoutes,
 } from '@/test/mockApi'
 import JobPage from '../JobPage'
-import { readyProfile, summaryOf } from './jobFixtures'
+import { readyProfile } from './jobFixtures'
 
 /** Stands in for the Workspace screen, so these tests can see where the page navigated to. */
 function WorkspaceStub() {
@@ -79,7 +79,6 @@ export function openJobPage({
     'GET /api/profile': profile
       ? jsonResponse(profile)
       : errorResponse(404, 'not_found', 'No profile'),
-    'GET /api/jobs': jsonResponse({ jobs: jobs.map(summaryOf) }),
     ...jobRoutes,
     ...routes,
   })

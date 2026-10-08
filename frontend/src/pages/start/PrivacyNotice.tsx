@@ -26,14 +26,6 @@ export function PrivacyNotice({ providerMode, ttlHours }: PrivacyNoticeProps) {
           This application stores it temporarily, for at most {ttlHours} hours, and then deletes
           it automatically.
         </li>
-        <li>
-          Access is tied to this browser tab. If you close the tab, you can lose access to your
-          work.
-        </li>
-        <li>
-          Once you have started, &ldquo;Clear my data&rdquo; at the top of the page deletes
-          everything immediately.
-        </li>
       </ul>
     </section>
   )

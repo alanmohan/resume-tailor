@@ -1,16 +1,12 @@
 /**
  * Addresses of the Target job screen.
  *
- * Which job the screen shows is decided by the URL alone, so a refresh or the
+ * What the screen shows is decided by the URL alone, so a refresh or the
  * browser's Back button always returns to the same place:
- *   /job            the most recently analyzed job, or the empty form if none
- *   /job?new=1      the empty form, to analyze another job
- *   /job?job=<id>   one specific job
+ *   /job            the form for a new job description
+ *   /job?job=<id>   a job that was already analyzed, to generate a draft for it
  */
-export const NEW_JOB_PARAM = 'new'
 export const JOB_ID_PARAM = 'job'
-
-export const NEW_JOB_PATH = `/job?${NEW_JOB_PARAM}=1`
 
 export function jobPath(jobId: string): string {
   return `/job?${JOB_ID_PARAM}=${encodeURIComponent(jobId)}`

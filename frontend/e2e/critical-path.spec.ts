@@ -1,7 +1,8 @@
 /**
  * The whole workflow as a new visitor experiences it, with the fictional
- * sample profile and job: input -> profile review -> job analysis ->
- * generation -> citations -> editing -> revalidation -> print -> clear data.
+ * sample profile and job: input -> profile review -> one-step tailoring ->
+ * citations -> requirements -> editing -> revalidation -> PDF download ->
+ * clear data.
  */
 import { SAMPLE_JOB, SAMPLE_SOURCES } from '../src/sample/sampleData.ts'
 import type { Generation } from '../src/lib/types.ts'
@@ -9,14 +10,17 @@ import {
   ACKNOWLEDGEMENT,
   DEMO_BANNER,
   apiGet,
+  TAILOR_BUTTON,
   claimWithText,
+  countDownloads,
   editClaim,
+  expectPdfDownload,
   generationIdFromUrl,
   heading,
   pinClaim,
-  printCalls,
   requireToken,
   screenshot,
+  workspaceOpened,
 } from './support/steps.ts'
 import { expect, test } from './support/test.ts'
 
@@ -43,8 +47,6 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
 
   const notice = page.getByRole('region', { name: 'How your data is handled' })
   await expect(notice).toContainText('for at most 24 hours')
-  await expect(notice).toContainText('Access is tied to this browser tab')
-  await expect(notice).toContainText('deletes everything immediately')
   await screenshot(page, 'desktop-1-start')
 
   await page.getByRole('button', { name: 'Try sample profile' }).click()
@@ -133,30 +135,21 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
   await expect(page.getByRole('textbox', { name: 'Role title (optional)' })).toHaveValue(SAMPLE_JOB.title)
   await expect(page.getByRole('textbox', { name: 'Company (optional)' })).toHaveValue(SAMPLE_JOB.company)
   await screenshot(page, 'desktop-4-job-form')
-  await page.getByRole('button', { name: 'Analyze job' }).click()
-
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
-  await expect(page.getByRole('region', { name: /^Required \(\d+\)$/ })).toBeVisible()
-  await expect(page.getByRole('region', { name: /^Preferred \(\d+\)$/ })).toBeVisible()
-
-  // Correct one requirement and save it.
-  const awsRequirement = page.getByRole('group', { name: 'Requirement 14', exact: true })
-  const awsText = awsRequirement.getByRole('textbox', { name: 'Requirement 14 text', exact: true })
-  await expect(awsText).toHaveValue('Experience with AWS')
-  await awsText.fill('Experience deploying services on AWS')
-  await expect(awsRequirement.getByText('User edited')).toBeVisible()
-  const jobStatus = page.locator('#job-action-status')
-  await expect(jobStatus).toHaveText('You have unsaved changes. Save them before generating.')
-  await page.getByRole('button', { name: 'Save changes' }).click()
-  await expect(jobStatus).toHaveText('All changes are saved.')
-  await screenshot(page, 'desktop-5-job-review')
-
-  await page.getByRole('button', { name: 'Generate tailored resume and cover letter' }).click()
+  // One submission analyzes the job and writes the draft: no review stop in between.
+  const analyses: string[] = []
+  const generations: string[] = []
+  page.on('request', (sent) => {
+    if (sent.method() !== 'POST') return
+    if (sent.url().endsWith('/api/jobs')) analyses.push(sent.url())
+    if (sent.url().endsWith('/api/generations')) generations.push(sent.url())
+  })
+  await page.getByRole('button', { name: TAILOR_BUTTON }).click()
 
   // ------------------------------------------------------------ Workspace
-  await page.waitForURL(/\/workspace\/[^/]+$/)
-  await expect(heading(page, 'Your tailored draft')).toBeVisible()
-  const generationId = generationIdFromUrl(page)
+  const generationId = await workspaceOpened(page)
+  expect(generationIdFromUrl(page)).toBe(generationId)
+  expect(analyses).toHaveLength(1)
+  expect(generations).toHaveLength(1)
   const token = await requireToken(page)
   await expect(page.getByText(DEMO_BANNER)).toBeVisible()
 
@@ -185,7 +178,7 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
 
   // An evidence badge opens the exact excerpt, its source and the role it belongs to.
   const ragClaim = await pinClaim(page, claimWithText(resumeExperience, RAG_BULLET))
-  const sidePanel = page.getByRole('complementary', { name: 'Evidence and coverage' })
+  const sidePanel = page.getByRole('complementary', { name: 'Evidence, coverage and requirements' })
   const badge = ragClaim.getByRole('button', { name: /^Show evidence \d+ for this statement$/ }).first()
   await badge.click()
   await expect(badge).toHaveAttribute('aria-pressed', 'true')
@@ -223,9 +216,24 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
   await expect(
     sidePanel.getByText('It is not a measure of job suitability, ATS compatibility or hiring probability.'),
   ).toBeVisible()
-  await expect(sidePanel.getByText('Experience deploying services on AWS')).toBeVisible()
+  await expect(sidePanel.getByText('Experience with AWS')).toBeVisible()
   expect(await page.locator('body').innerText()).not.toMatch(FORBIDDEN_WORDING)
   await screenshot(page, 'desktop-9-workspace-coverage')
+
+  // Requirements: what was extracted from the posting, to read and not to edit.
+  await sidePanel.getByRole('tab', { name: 'Requirements' }).click()
+  const requirements = sidePanel.getByRole('tabpanel', { name: 'Requirements' })
+  await expect(requirements.getByRole('region', { name: /^Required \(\d+\)$/ })).toBeVisible()
+  const preferred = requirements.getByRole('region', { name: /^Preferred \(\d+\)$/ })
+  await expect(preferred.getByText('Experience with AWS')).toBeVisible()
+  await expect(requirements.getByRole('listitem')).toHaveCount(generation.coverage.length)
+  await expect(requirements.getByRole('textbox')).toHaveCount(0)
+  await expect(requirements.getByRole('combobox')).toHaveCount(0)
+  await requirements.getByRole('button', { name: /^View source of requirement \d+$/ }).first().click()
+  const source = page.getByRole('dialog').getByRole('blockquote')
+  expect(SAMPLE_JOB.description).toContain(await source.innerText())
+  await page.keyboard.press('Escape')
+  await screenshot(page, 'desktop-9b-workspace-requirements')
 
   // ------------------------------------------------- Edit and revalidate
   await expect(page.getByText('No statements are flagged.')).toBeVisible()
@@ -235,14 +243,16 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
   await expect(page.getByText('1 edited, not revalidated')).toBeVisible()
   await expect(page.getByText('No statements are flagged.')).toBeHidden()
 
-  // Printing now asks for a review first and does not print behind the user's back.
-  await page.getByRole('button', { name: 'Print / Save as PDF' }).click()
-  const printGate = page.getByRole('dialog', { name: 'Review before printing' })
-  await expect(printGate).toContainText('Some statements were edited after the last validation.')
-  await expect(printGate.getByRole('button', { name: 'Print anyway' })).toBeDisabled()
-  await printGate.getByRole('button', { name: 'Cancel' }).click()
-  await expect(printGate).toBeHidden()
-  expect(await printCalls(page)).toBe(0)
+  // Downloading now asks for a review first and saves nothing behind the user's back.
+  const downloads = countDownloads(page)
+  const downloadButton = page.getByRole('button', { name: 'Download PDF' })
+  await downloadButton.click()
+  const downloadGate = page.getByRole('dialog', { name: 'Review before downloading' })
+  await expect(downloadGate).toContainText('Some statements were edited after the last validation.')
+  await expect(downloadGate.getByRole('button', { name: 'Download anyway' })).toBeDisabled()
+  await downloadGate.getByRole('button', { name: 'Cancel' }).click()
+  await expect(downloadGate).toBeHidden()
+  expect(downloads()).toBe(0)
 
   await page.getByRole('button', { name: 'Revalidate' }).click()
   await expect(page.getByText('Edited - revalidate before export')).toBeHidden()
@@ -251,11 +261,22 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
   await expect(ragClaim.getByText('Edited by you')).toBeVisible()
   await expect(page.getByText('No statements are flagged.')).toBeVisible()
 
-  // ---------------------------------------------------------------- Print
-  await page.getByRole('button', { name: 'Print / Save as PDF' }).click()
-  await expect.poll(() => printCalls(page)).toBe(1)
-  await expect(printGate).toBeHidden()
+  // --------------------------------------------------------- Download PDF
+  // Nothing is flagged any more: the file is saved straight away, as a real PDF.
+  const resumePdf = await expectPdfDownload(page, downloadButton, 'Jordan Rivera - Resume.pdf')
+  await expect(downloadGate).toBeHidden()
+  await expect(page.getByText('Resume downloaded')).toBeVisible()
+  // Selectable text set in a font, not a picture of the page.
+  expect(resumePdf.toString('latin1')).toContain('/Font')
+  expect(downloads()).toBe(1)
 
+  // The button saves the document that is shown.
+  await page.getByRole('tab', { name: 'Cover letter' }).click()
+  await expectPdfDownload(page, downloadButton, 'Jordan Rivera - Cover Letter.pdf')
+  await expect(page.getByText('Cover letter downloaded')).toBeVisible()
+  await page.getByRole('tab', { name: 'Resume' }).click()
+
+  // A visitor who prints from the browser instead (Ctrl/Cmd+P) gets the document only.
   await page.emulateMedia({ media: 'print' })
   // The document itself is on the page...
   await expect(resume.getByRole('heading', { name: 'Jordan Rivera' })).toBeVisible()
@@ -269,7 +290,7 @@ test('a visitor tailors a resume from the sample profile and clears the data', a
   await expect(page.getByRole('tablist').first()).toBeHidden()
   await expect(sidePanel).toBeHidden()
   await expect(page.getByText('Validated', { exact: true })).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Print / Save as PDF' })).toBeHidden()
+  await expect(downloadButton).toBeHidden()
   await expect(ragClaim.getByRole('button', { name: /^Show evidence/ }).first()).toBeHidden()
   await expect(ragClaim.getByRole('button', { name: 'Edit this statement' })).toBeHidden()
   await expect(ragClaim.getByText('Supported')).toBeHidden()

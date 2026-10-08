@@ -103,7 +103,7 @@ describe('ProfilePage records', () => {
     // A skill group has no employer or dates.
     expect(skills.queryByLabelText('Start date')).toBeNull()
 
-    expect(within(screen.getByRole('region', { name: 'Projects' })).getByText(/Nothing was found/)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Projects' })).getByText(/No match found in your sources/)).toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('Riley Example')
   })
 

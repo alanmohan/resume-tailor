@@ -4,78 +4,32 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import type { Job } from '@/lib/types'
 
 const numberFormat = new Intl.NumberFormat('en-US')
 
-interface JobDetailsProps {
-  job: Job
-  /** Draft values of the two editable fields. */
-  title: string
-  company: string
-  titleError: string | undefined
-  companyError: string | undefined
-  disabled: boolean
-  onChange: (change: { title?: string; company?: string }) => void
-}
-
 /**
- * The job's editable role title and company, the summary produced by the
- * analysis, and the original posting to compare the requirements against.
- * Summary and posting are untrusted text and are rendered as plain text only.
+ * A stored job, read-only: role title, company, the summary produced by the
+ * analysis and the original posting. All of it is untrusted text and is
+ * rendered as plain text only.
  */
-export function JobDetails({
-  job,
-  title,
-  company,
-  titleError,
-  companyError,
-  disabled,
-  onChange,
-}: JobDetailsProps) {
+export function JobDetails({ job }: { job: Job }) {
   return (
     <section aria-labelledby="job-details-heading" className="space-y-4">
       <h2 id="job-details-heading" className="text-xl font-medium">
         Job details
       </h2>
 
-      <fieldset disabled={disabled} className="grid min-w-0 gap-4 sm:grid-cols-2">
-        <legend className="sr-only">Role and company</legend>
-        <div className="space-y-1.5">
-          <Label htmlFor="review-title">Role title</Label>
-          <Input
-            id="review-title"
-            autoComplete="off"
-            value={title}
-            aria-invalid={titleError ? true : undefined}
-            aria-describedby={titleError ? 'review-title-error' : undefined}
-            onChange={(event) => onChange({ title: event.target.value })}
-          />
-          {titleError ? (
-            <p id="review-title-error" role="alert" className="text-sm text-destructive">
-              {titleError}
-            </p>
-          ) : null}
+      <dl className="grid gap-4 sm:grid-cols-2">
+        <div className="min-w-0 space-y-0.5">
+          <dt className="text-sm font-medium">Role title</dt>
+          <dd className="break-words text-muted-foreground">{job.title ?? 'Not given'}</dd>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="review-company">Company</Label>
-          <Input
-            id="review-company"
-            autoComplete="off"
-            value={company}
-            aria-invalid={companyError ? true : undefined}
-            aria-describedby={companyError ? 'review-company-error' : undefined}
-            onChange={(event) => onChange({ company: event.target.value })}
-          />
-          {companyError ? (
-            <p id="review-company-error" role="alert" className="text-sm text-destructive">
-              {companyError}
-            </p>
-          ) : null}
+        <div className="min-w-0 space-y-0.5">
+          <dt className="text-sm font-medium">Company</dt>
+          <dd className="break-words text-muted-foreground">{job.company ?? 'Not given'}</dd>
         </div>
-      </fieldset>
+      </dl>
 
       {job.role_summary ? (
         <div className="space-y-1">

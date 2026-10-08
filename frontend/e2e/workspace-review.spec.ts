@@ -1,25 +1,28 @@
 /**
  * Reviewing a draft against the real API: validation after a dishonest edit,
- * the print gate, regeneration, coverage corrections, copying, and drafts
+ * the download gate, regeneration, coverage corrections, copying, and drafts
  * that go out of date.
  */
 import {
   claimWithText,
+  countDownloads,
   editClaim,
+  expectPdfDownload,
   heading,
   pinClaim,
-  printCalls,
   reachWorkspaceWithSample,
+  workspaceOpened,
 } from './support/steps.ts'
 import { expect, test } from './support/test.ts'
 
 const DOCKER_BULLET = /^Packaged model services as Docker images/
 const KUBERNETES_EDIT = 'Packaged model services as Docker images and ran them on Kubernetes'
 
-test('a skill the profile does not contain is flagged after revalidation and gates printing', async ({
+test('a skill the profile does not contain is flagged after revalidation and gates the download', async ({
   page,
 }) => {
   await reachWorkspaceWithSample(page)
+  const downloads = countDownloads(page)
   const resume = page.getByRole('tabpanel', { name: 'Resume' })
   const claim = await pinClaim(page, claimWithText(resume, DOCKER_BULLET))
   await expect(claim.getByText('Supported')).toBeVisible()
@@ -37,20 +40,20 @@ test('a skill the profile does not contain is flagged after revalidation and gat
   // The text itself is the visitor's: revalidation never rewrites it.
   await expect(claim.locator('.ws-claim-text')).toHaveText(KUBERNETES_EDIT)
 
-  // Printing lists the flagged statement and needs an explicit acknowledgement.
-  await page.getByRole('button', { name: 'Print / Save as PDF' }).click()
-  const printGate = page.getByRole('dialog', { name: 'Review before printing' })
-  await expect(printGate).toContainText('1 statement has not been confirmed by validation.')
-  await expect(printGate.getByText(KUBERNETES_EDIT)).toBeVisible()
-  await expect(printGate.getByText('Unsupported')).toBeVisible()
-  const printAnyway = printGate.getByRole('button', { name: 'Print anyway' })
-  await expect(printAnyway).toBeDisabled()
+  // Downloading lists the flagged statement and needs an explicit acknowledgement.
+  await page.getByRole('button', { name: 'Download PDF' }).click()
+  const downloadGate = page.getByRole('dialog', { name: 'Review before downloading' })
+  await expect(downloadGate).toContainText('1 statement has not been confirmed by validation.')
+  await expect(downloadGate.getByText(KUBERNETES_EDIT)).toBeVisible()
+  await expect(downloadGate.getByText('Unsupported')).toBeVisible()
+  const downloadAnyway = downloadGate.getByRole('button', { name: 'Download anyway' })
+  await expect(downloadAnyway).toBeDisabled()
 
-  // "Review" closes the dialog and goes to the statement instead of printing.
-  await printGate.getByRole('button', { name: 'Review' }).click()
-  await expect(printGate).toBeHidden()
+  // "Review" closes the dialog and goes to the statement instead of downloading.
+  await downloadGate.getByRole('button', { name: 'Review' }).click()
+  await expect(downloadGate).toBeHidden()
   await expect(claim).toBeFocused()
-  expect(await printCalls(page)).toBe(0)
+  expect(downloads()).toBe(0)
 
   // The browser's own print command (Ctrl/Cmd+P, the browser menu) never
   // opens that dialog. Until the statement is acknowledged, what it would put
@@ -75,13 +78,15 @@ test('a skill the profile does not contain is flagged after revalidation and gat
   await expect(copyGate).toBeHidden()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('clipboard before the test')
 
-  await page.getByRole('button', { name: 'Print / Save as PDF' }).click()
-  await printGate.getByRole('checkbox', { name: /I have read these statements/ }).check()
-  await printAnyway.click()
-  await expect(printGate).toBeHidden()
-  await expect.poll(() => printCalls(page)).toBe(1)
+  // After the acknowledgement the file is saved, with the visitor's own wording in it.
+  await page.getByRole('button', { name: 'Download PDF' }).click()
+  await downloadGate.getByRole('checkbox', { name: /I have read these statements/ }).check()
+  await expectPdfDownload(page, downloadAnyway, 'Jordan Rivera - Resume.pdf')
+  await expect(downloadGate).toBeHidden()
+  await expect(page.getByText('Resume downloaded')).toBeVisible()
+  expect(downloads()).toBe(1)
 
-  // Acknowledged for this revision of the draft: now the document is what prints.
+  // Acknowledged for this revision of the draft: now the document is also what the browser prints.
   await page.emulateMedia({ media: 'print' })
   await expect(printNotice).toBeHidden()
   await expect(resume.getByRole('heading', { name: 'Jordan Rivera' })).toBeVisible()
@@ -93,7 +98,7 @@ test('a skill the profile does not contain is flagged after revalidation and gat
 test('the resume is copied, a statement regenerated and a coverage status corrected', async ({ page }) => {
   await reachWorkspaceWithSample(page)
   const resume = page.getByRole('tabpanel', { name: 'Resume' })
-  const sidePanel = page.getByRole('complementary', { name: 'Evidence and coverage' })
+  const sidePanel = page.getByRole('complementary', { name: 'Evidence, coverage and requirements' })
 
   // Nothing is flagged in the fresh draft, so Copy gives the document straight
   // away: plain text, without review markers.
@@ -159,8 +164,28 @@ test('editing the profile marks the existing draft as out of date', async ({ pag
   await stale.getByRole('link', { name: 'Generate a new draft' }).click()
   // The link names the draft's own job, so a newer job can never be opened by mistake.
   await expect(page).toHaveURL(/\/job\?job=[^&]+$/)
-  await expect(heading(page, 'Review the job requirements')).toBeVisible()
+  await expect(heading(page, 'Your target job')).toBeVisible()
   await expect(page.getByText('Your profile is not confirmed yet')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Generate tailored resume and cover letter' })).toBeDisabled()
+  const generate = page.getByRole('button', { name: 'Generate a new draft' })
+  await expect(generate).toBeDisabled()
   await expect(page.getByRole('region', { name: 'Drafts for this job' }).getByText('Stale', { exact: true })).toBeVisible()
+
+  // Once the profile is confirmed again, a new draft is written for the same
+  // job without analyzing the job a second time.
+  const analyses: string[] = []
+  page.on('request', (sent) => {
+    if (sent.method() === 'POST' && sent.url().endsWith('/api/jobs')) analyses.push(sent.url())
+  })
+  await page.getByRole('link', { name: 'Review and confirm profile' }).click()
+  await page.getByRole('button', { name: 'Confirm profile and build evidence index' }).click()
+  await expect(page.getByText('Profile confirmed', { exact: true })).toBeVisible()
+  await page.goBack()
+  await expect(heading(page, 'Your target job')).toBeVisible()
+  await expect(generate).toBeEnabled()
+  await generate.click()
+  const newGenerationId = await workspaceOpened(page)
+  expect(newGenerationId).not.toBe(generationId)
+  expect(analyses).toHaveLength(0)
+  await expect(page.getByText('This draft is out of date')).toBeHidden()
+  await expect(page.getByRole('tabpanel', { name: 'Resume' }).getByText('Cleveland, OH')).toBeVisible()
 })

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { ProfileRecord } from '@/lib/types'
-import { focusSoon } from '@/pages/job/focusSoon'
+import { focusSoon } from '@/lib/focusSoon'
 import { ItemMeta } from './ItemMeta'
 import {
   addRecordButtonId,
