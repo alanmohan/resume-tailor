@@ -258,47 +258,47 @@ WEB=https://<static-site-name>.onrender.com
 
 | Item | Value |
 |---|---|
-| Date and time of verification (ET) | |
-| Deployed commit (full SHA) | |
-| Repository URL | |
-| API URL | |
-| Frontend URL | |
-| Render region | |
-| Atlas cluster tier and region | |
-| API build status / deploy ID | |
-| Static site build status / deploy ID | |
-| Node version used by the static site build | |
-| Environment variable **names** set on the API (no values) | |
-| Environment variable **names** set on the static site (no values) | |
-| Atlas access list entries (ranges only; note if `0.0.0.0/0` was used and why) | |
+| Date and time of verification (ET) | 2026-10-07, 8:00 PM to 8:06 PM (earlier rounds at 6:09 PM and 6:40 PM on older builds) |
+| Deployed commit (full SHA) | `7a37245d15df2de49c064f11b4ae6ed44f518fc3` |
+| Repository URL | <https://github.com/alanmohan/resume-tailor> (public) |
+| API URL | <https://resume-tailor-api-ax8j.onrender.com> |
+| Frontend URL | <https://resume-tailor-web-saj1.onrender.com> |
+| Render region | Oregon (API, free web service); the static site is served from Render's CDN |
+| Atlas cluster tier and region | Created by the author; not visible to the assistant that ran these checks |
+| API build status / deploy ID | live; `dep-db3doc7avr4c739bqjd0` (first deploy of this commit) and `dep-db3drtij9qps73f7g6og` (restart for check 17) |
+| Static site build status / deploy ID | serving the build of this commit; `dep-db3doc7lk1mc73bq0n3g` |
+| Node version used by the static site build | not verified (Render's default; no `NODE_VERSION` is set) |
+| Environment variable **names** set on the API (no values) | Entered by the author in the dashboard: `OPENAI_API_KEY`, `MONGODB_URI`. Set through the Render connector: `PYTHON_VERSION`, `APP_ENV`, `CORS_ORIGINS`, `TRUST_PROXY_HEADERS`, `CLIENT_IP_HEADER`, `MONGODB_DATABASE`, `AI_PROVIDER`, `OPENAI_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, `OPENAI_REASONING_EFFORT`, `RETRIEVAL_MODE`, `SESSION_TTL_HOURS`, `MAX_PROFILE_CHARS`, `MAX_JOB_CHARS`, `PROVIDER_TIMEOUT_SECONDS`, `PROVIDER_MAX_RETRIES`, `SESSION_CREATE_LIMIT_PER_HOUR`, `GLOBAL_DAILY_AI_CALL_LIMIT` |
+| Environment variable **names** set on the static site (no values) | `VITE_API_BASE_URL` |
+| Atlas access list entries (ranges only; note if `0.0.0.0/0` was used and why) | Managed by the author (his own address and the API service's outbound addresses); not visible to the assistant |
 
 ### 8.2 Checks
 
 | # | Check | How | Expected | Result | Notes |
 |---|---|---|---|---|---|
-| 1 | Liveness | `curl -s $API/healthz` | `{"status":"ok"}` | | |
-| 2 | Readiness and real provider | `curl -s $API/readyz` | HTTP 200, `"status":"ready"`, `"database":"ok"`, `"provider":"configured"`, `"provider_mode":"openai"` | | |
-| 3 | CORS allows the frontend | `curl -s -i -X OPTIONS $API/api/generations -H "Origin: $WEB" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization,content-type,idempotency-key"` | 200; `access-control-allow-origin` equals `$WEB` exactly; `idempotency-key` among the allowed headers | | |
-| 4 | CORS refuses another origin | same command with `-H "Origin: https://example.org"` | 400 and no `access-control-allow-origin` header | | |
-| 5 | Protected route needs a token | `curl -s -o /dev/null -w '%{http_code}\n' $API/api/profile` | `401` | | |
-| 6 | Not demo mode | Open `$WEB` in a private window | No "Demo mode" banner; the privacy notice names the AI provider | | |
-| 7 | Full flow with the sample profile | Start > Try sample profile > submit > review > resolve the conflict > confirm > target job (sample job) > generate | A draft opens in the workspace; no step needed a manual URL | | |
-| 8 | Source links | Click several evidence badges on resume bullets and coverage rows | The exact source excerpt, source label and role or project are shown | | |
-| 9 | Coverage | Open the coverage panel | Counts and percentage shown; missing items say no evidence was found in the supplied profile; labelled as evidence coverage | | |
-| 10 | Manual edit and revalidation | Edit a bullet, save, then Revalidate | The item shows as edited until revalidated; the status changes after Revalidate; the text is unchanged | | |
-| 11 | Targeted regeneration | Regenerate one bullet | Only that item changes and it has a status | | |
-| 12 | Print | Print / Save as PDF for the resume and for the cover letter | One column, selectable text, no badges, buttons or panels; sensible page breaks | | |
-| 13 | Mobile | Repeat steps 7 to 10 at 375 px width (browser device toolbar or a phone) | No horizontal scrolling; tabs and the evidence sheet work | | |
-| 14 | Deep link refresh | Refresh on `/profile`, `/job` and `/workspace/<id>`; also `curl -s -o /dev/null -w '%{http_code}\n' $WEB/profile` | The same screen returns; `200` | | |
-| 15 | Clear my data | Clear my data, confirm | Returns to Start; the old workspace URL shows no draft | | |
-| 16 | Second session isolation | In a second private window create another session; try the first session's workspace URL | "Draft not found"; neither session sees the other's profile, jobs or drafts | | |
-| 17 | Persistence across restart | Note a workspace URL, restart the API from the Render dashboard, reload the page in the same tab | The draft is still there | | |
-| 18 | Cold start | Leave the API idle for more than 15 minutes, then open `$WEB` in a new private window and submit the Start form | A waking notice, then the flow continues without an error page | | |
-| 19 | No secret in the frontend bundle | See the commands below | No match | | |
-| 20 | No secret or personal data in the repository | On GitHub, confirm `.env` and the experience master file are absent; search the repository for `sk-` and `mongodb+srv://` | Absent; no real key or connection string | | |
-| 21 | No token in URLs | Watch the address bar and the browser's network panel during the flow | The session token appears only in the `Authorization` header | | |
-| 22 | Logs are clean | Render > API service > Logs, after running the flow | JSON lines with request ID, route template, status, duration and token counts; no pasted text, generated text, bearer token, API key or connection string | | |
-| 23 | Rate limit sees real client addresses | See [section 11](#11-not-yet-verified) | | | |
+| 1 | Liveness | `curl -s $API/healthz` | `{"status":"ok"}` | Pass | `{"status":"ok"}` |
+| 2 | Readiness and real provider | `curl -s $API/readyz` | HTTP 200, `"status":"ready"`, `"database":"ok"`, `"provider":"configured"`, `"provider_mode":"openai"` | Pass | HTTP 200, ready, database ok, provider configured, `provider_mode` openai; the response also carries `limits` |
+| 3 | CORS allows the frontend | `curl -s -i -X OPTIONS $API/api/generations -H "Origin: $WEB" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization,content-type,idempotency-key"` | 200; `access-control-allow-origin` equals `$WEB` exactly; `idempotency-key` among the allowed headers | Pass | 200 with `access-control-allow-origin` equal to the frontend origin |
+| 4 | CORS refuses another origin | same command with `-H "Origin: https://example.org"` | 400 and no `access-control-allow-origin` header | Pass | 400 and no `access-control-allow-origin` header |
+| 5 | Protected route needs a token | `curl -s -o /dev/null -w '%{http_code}\n' $API/api/profile` | `401` | Pass | 401 |
+| 6 | Not demo mode | Open `$WEB` in a private window | No "Demo mode" banner; the privacy notice names the AI provider | Pass | No demo banner on Start or in the workspace (headless Chromium, fresh context). The script asserted the retention sentence of the privacy notice, not the provider name |
+| 7 | Full flow with the sample profile | Start > Try sample profile > submit > review > resolve the conflict > confirm > target job (sample job) > generate | A draft opens in the workspace; no step needed a manual URL | Pass | Scripted Chromium run, 8:00 PM: extract 37 s, confirm 5 s (44 evidence records), job analysis 12 s, generation 22 s. Also run through the API with the Kubernetes stretch job |
+| 8 | Source links | Click several evidence badges on resume bullets and coverage rows | The exact source excerpt, source label and role or project are shown | Pass | A resume bullet badge showed the exact excerpt, source label and role. Badges on coverage rows were not clicked on the live site |
+| 9 | Coverage | Open the coverage panel | Counts and percentage shown; missing items say no evidence was found in the supplied profile; labelled as evidence coverage | Pass | Sample job: 95.8%, 11 supported, 1 partially supported. Stretch job through the API: 28.6%, 4 supported, 10 with no evidence found, 1 uncertain; no document mentions Kubernetes |
+| 10 | Manual edit and revalidation | Edit a bullet, save, then Revalidate | The item shows as edited until revalidated; the status changes after Revalidate; the text is unchanged | Pass | Edited bullet showed 'Edited - needs revalidation'; the flag cleared after Revalidate |
+| 11 | Targeted regeneration | Regenerate one bullet | Only that item changes and it has a status | Pass | Through the API, not the button: one bullet regenerated with an instruction, status supported, all other bullets unchanged (6 s) |
+| 12 | Print | Print / Save as PDF for the resume and for the cover letter | One column, selectable text, no badges, buttons or panels; sensible page breaks | Pass | Resume under emulated print media in Chromium: document visible, no buttons or header, PDF saved. Cover-letter printing and the review gate were checked by the local Playwright suite, not on the live site |
+| 13 | Mobile | Repeat steps 7 to 10 at 375 px width (browser device toolbar or a phone) | No horizontal scrolling; tabs and the evidence sheet work | Partly | No horizontal overflow at 375 px on Start, Profile, Target job and Workspace on the live site. The mobile tabs and evidence sheet were exercised by the local Playwright suite only |
+| 14 | Deep link refresh | Refresh on `/profile`, `/job` and `/workspace/<id>`; also `curl -s -o /dev/null -w '%{http_code}\n' $WEB/profile` | The same screen returns; `200` | Pass | Browser refresh on `/profile` and `/workspace/<id>` kept the session and the screen; `curl` returns 200 for `/profile`, `/job` and `/workspace/x`. The first version of the rewrite rule returned an empty page and was corrected by the author |
+| 15 | Clear my data | Clear my data, confirm | Returns to Start; the old workspace URL shows no draft | Pass | Returned to Start, sessionStorage empty, the old token answered 401. A repeated DELETE with the revoked token answers 200 with zero counts |
+| 16 | Second session isolation | In a second private window create another session; try the first session's workspace URL | "Draft not found"; neither session sees the other's profile, jobs or drafts | Pass | A second browser context did not show the first draft; its own token got 404 for the first session's draft and 404 for its own (absent) profile |
+| 17 | Persistence across restart | Note a workspace URL, restart the API from the Render dashboard, reload the page in the same tab | The draft is still there | Pass | Draft created 8:03 PM, API redeployed (new instance live 8:05:26 PM), draft and confirmed profile read back unchanged at 8:05:47 PM with the same token |
+| 18 | Cold start | Leave the API idle for more than 15 minutes, then open `$WEB` in a new private window and submit the Start form | A waking notice, then the flow continues without an error page | Partly | At 7:48 PM the API had been idle for more than 15 minutes and answered `/readyz` after about 27 s. The waking notice in the browser was not observed on the live site (unit-tested only) |
+| 19 | No secret in the frontend bundle | See the commands below | No match | Pass | 3 files downloaded; no key or connection string; no experience-master text; the fictional sample is present as expected |
+| 20 | No secret or personal data in the repository | On GitHub, confirm `.env` and the experience master file are absent; search the repository for `sk-` and `mongodb+srv://` | Absent; no real key or connection string | Pass | 404 files on `main`; no `.env`, no experience master, no `.docx`, no local job text. The only `sk-` and `mongodb+srv://` strings are fake values in unit tests |
+| 21 | No token in URLs | Watch the address bar and the browser's network panel during the flow | The session token appears only in the `Authorization` header | Pass | 47 requests recorded during the scripted run; the token appears in no URL |
+| 22 | Logs are clean | Render > API service > Logs, after running the flow | JSON lines with request ID, route template, status, duration and token counts; no pasted text, generated text, bearer token, API key or connection string | Pass | A log search since 6:00 PM for the sample name, an employer, `Bearer`, `mongodb`, `sk-` and `example.com` returned nothing. Lines carry request ID, operation, model, token counts and duration |
+| 23 | Rate limit sees real client addresses | See [section 11](#11-not-yet-verified) | | Pass (after a fix) | Before the fix, 20 requests with a forged first `X-Forwarded-For` hop were counted against the forged address. After it, 23 requests with rotating forged hops got 20 x 201 then 429, a forged `CF-Connecting-IP` was refused by the edge (403), and the `session_create` log line shows `client_ip_source` `cf-connecting-ip` |
 
 Commands for check 19:
 
@@ -315,7 +315,13 @@ The bundle is expected to contain the API's public URL and the fictional sample 
 
 | Item | Why it was not verified |
 |---|---|
-| | |
+| Node version of the static-site build | Not recorded; the build used Render's default and succeeded |
+| Atlas tier, region and access list | Set up by the author; the assistant had no access to Atlas |
+| Waking notice in the browser after a cold start | Only the API's wake time was observed (about 27 s) |
+| Regeneration through the workspace button on the live site | Checked through the API on the live service and through the UI in the local Playwright suite |
+| Mobile tabs and evidence sheet on the live site | Only horizontal overflow was checked live; the interactions are in the local Playwright suite |
+| Printing in Safari and Firefox | Only Chromium was used |
+| A database named `resume_tailor_test_review_frontend` on the Atlas cluster | Created by mistake during review (fictional sample data only, see `prompt_log.md`); it has to be dropped by the author |
 
 ## 9. Troubleshooting
 

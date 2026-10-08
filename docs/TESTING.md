@@ -397,6 +397,23 @@ The review findings were fixed in the evening and the backend was then checked a
 
 Not done in this pass: the changes made after the HTTP walk-through (the skill-line split, the coverage aliases and the extraction prompt) were checked by the unit, integration and smoke tests and by the self-test, not by starting the server again.
 
+### Final run of every suite on the deployed commit (19:57 to 19:59 ET)
+
+All commands were run once more, in one sequence on an otherwise idle machine, on the code of commit `7a37245`, which is the commit deployed to Render.
+
+| Command | Observed | Time (ET) |
+|---|---|---|
+| `python -m pytest tests/unit -q` (from `backend/`) | **788 passed** in 1.6 s | 19:57 |
+| `python -m pytest tests/integration -q` | **362 passed** in 35 s | 19:57 |
+| `ruff check .` | All checks passed | 19:57 |
+| `npm run lint` (from `frontend/`) | exit status 0 | 19:58 |
+| `npm run typecheck` | exit status 0 | 19:58 |
+| `npm run test -- --run` | **275 passed** in 20 files | 19:58 |
+| `npm run build` | exit status 0 | 19:58 |
+| `npm run test:e2e` | **17 passed** in 44 s (Chromium, fake provider, local throwaway database) | 19:58 |
+
+The frontend unit tests, which timed out in the earlier attempts above while many agents were running, passed on the first attempt here. The results of the checks on the live deployment are in [DEPLOYMENT.md](DEPLOYMENT.md) section 8.
+
 ## 12. Specification test matrix
 
 The eleven items are the "Required meaningful tests" of the specification (section 9). The backend column summarises `backend/tests/TEST_MATRIX.md`, which lists every test by name and is itself checked by `tests/unit/test_test_matrix.py` (it fails if a listed test does not exist). Frontend unit tests are named by file under `frontend/src/`; end-to-end specs by file under `frontend/e2e/`.
