@@ -254,25 +254,7 @@ API=https://<api-service-name>.onrender.com
 WEB=https://<static-site-name>.onrender.com
 ```
 
-### 8.1 Record of the deployment
-
-| Item | Value |
-|---|---|
-| Date and time of verification (ET) | 2026-10-07, 8:00 PM to 8:06 PM (earlier rounds at 6:09 PM and 6:40 PM on older builds) |
-| Deployed commit (full SHA) | `7a37245d15df2de49c064f11b4ae6ed44f518fc3` |
-| Repository URL | <https://github.com/alanmohan/resume-tailor> (public) |
-| API URL | <https://resume-tailor-api-ax8j.onrender.com> |
-| Frontend URL | <https://resume-tailor-web-saj1.onrender.com> |
-| Render region | Oregon (API, free web service); the static site is served from Render's CDN |
-| Atlas cluster tier and region | Created by the author; not visible to the assistant that ran these checks |
-| API build status / deploy ID | live; `dep-db3doc7avr4c739bqjd0` (first deploy of this commit) and `dep-db3drtij9qps73f7g6og` (restart for check 17) |
-| Static site build status / deploy ID | serving the build of this commit; `dep-db3doc7lk1mc73bq0n3g` |
-| Node version used by the static site build | not verified (Render's default; no `NODE_VERSION` is set) |
-| Environment variable **names** set on the API (no values) | Entered by the author in the dashboard: `OPENAI_API_KEY`, `MONGODB_URI`. Set through the Render connector: `PYTHON_VERSION`, `APP_ENV`, `CORS_ORIGINS`, `TRUST_PROXY_HEADERS`, `CLIENT_IP_HEADER`, `MONGODB_DATABASE`, `AI_PROVIDER`, `OPENAI_MODEL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, `OPENAI_REASONING_EFFORT`, `RETRIEVAL_MODE`, `SESSION_TTL_HOURS`, `MAX_PROFILE_CHARS`, `MAX_JOB_CHARS`, `PROVIDER_TIMEOUT_SECONDS`, `PROVIDER_MAX_RETRIES`, `SESSION_CREATE_LIMIT_PER_HOUR`, `GLOBAL_DAILY_AI_CALL_LIMIT` |
-| Environment variable **names** set on the static site (no values) | `VITE_API_BASE_URL` |
-| Atlas access list entries (ranges only; note if `0.0.0.0/0` was used and why) | Managed by the author (his own address and the API service's outbound addresses); not visible to the assistant |
-
-### 8.2 Checks
+### 8.1 Checks
 
 | # | Check | How | Expected | Result | Notes |
 |---|---|---|---|---|---|
@@ -311,7 +293,7 @@ grep -lE 'sk-[A-Za-z0-9_-]{20,}|mongodb(\+srv)?://' * || echo "no key or connect
 
 The bundle is expected to contain the API's public URL and the fictional sample profile (Jordan Rivera). It must not contain text from the experience master file.
 
-### 8.3 Anything that could not be verified
+### 8.2 Anything that could not be verified
 
 | Item | Why it was not verified |
 |---|---|

@@ -2,7 +2,7 @@
 
 # Resume Tailor: architecture
 
-This document describes what the code in this repository does, as read from the source on 2026-10-07. File paths are relative to the repository root. Related documents: [API.md](API.md), [TESTING.md](TESTING.md), [DEPLOYMENT.md](DEPLOYMENT.md), [AUTHOR_CHECKLIST.md](AUTHOR_CHECKLIST.md).
+This document describes what the code in this repository does, as read from the source on 2026-10-07. File paths are relative to the repository root. Related documents: [API.md](API.md), [TESTING.md](TESTING.md), [DEPLOYMENT.md](DEPLOYMENT.md).
 
 Contents
 

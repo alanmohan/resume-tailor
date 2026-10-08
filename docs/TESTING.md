@@ -399,7 +399,7 @@ Not done in this pass: the changes made after the HTTP walk-through (the skill-l
 
 ### Final run of every suite on the deployed commit (19:57 to 19:59 ET)
 
-All commands were run once more, in one sequence on an otherwise idle machine, on the code of commit `7a37245`, which is the commit deployed to Render.
+All commands were run once more, in one sequence on an otherwise idle machine, on the code that was deployed to Render at that time.
 
 | Command | Observed | Time (ET) |
 |---|---|---|
