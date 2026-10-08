@@ -116,9 +116,6 @@ export function RequirementsPanel() {
     <div className="space-y-5">
       <div>
         <h2 className="text-base font-medium">Job requirements</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Extracted from the job description this draft was written for.
-        </p>
       </div>
       {GROUPS.map(({ importance, title }) => {
         const group = requirements.filter((requirement) => requirement.importance === importance)

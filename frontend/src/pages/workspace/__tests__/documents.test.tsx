@@ -411,7 +411,7 @@ describe('Workspace revalidation', () => {
     expect(screen.queryByText('Edited - revalidate before export')).toBeNull()
   })
 
-  it('shows the validation time, the flagged counts and the limits of validation', async () => {
+  it('shows the validation time and the flagged counts', async () => {
     const generation = withClaim(makeGeneration(), 'p-1', { validation_status: 'unsupported' })
     generation.validation.unsupported_count = 1
     openWorkspace(generation)
@@ -421,7 +421,6 @@ describe('Workspace revalidation', () => {
     expect(document.querySelector('time[datetime="2026-10-07T16:12:00Z"]')).toBeInTheDocument()
     expect(screen.getByText('1 needs review')).toBeInTheDocument()
     expect(screen.getByText('1 unsupported')).toBeInTheDocument()
-    expect(screen.getByText(/reduces the risk of fabricated claims but cannot eliminate it/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Revalidate' })).toBeNull()
   })
 

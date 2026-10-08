@@ -252,8 +252,7 @@ export function Workspace({ generation }: { generation: Generation }) {
               <>
                 <p>
                   {target ? `Tailored for ${target}. ` : null}
-                  Every statement shows the evidence it was written from. Select a numbered badge
-                  to read the source text.
+                  Select a numbered badge to read the source text.
                 </p>
                 <p className="mt-1 text-sm">
                   Generated{' '}

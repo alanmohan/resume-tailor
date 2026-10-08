@@ -109,11 +109,6 @@ export function ValidationBar({ flagged }: ValidationBarProps) {
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        Automated validation checks numbers, names and skills against the evidence each statement
-        cites. It reduces the risk of fabricated claims but cannot eliminate it, so read every
-        statement before you use these documents.
-      </p>
 
       {revalidate.isError ? (
         <WriteError

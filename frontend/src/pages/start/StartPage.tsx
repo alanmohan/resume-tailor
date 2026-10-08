@@ -112,8 +112,7 @@ export default function StartPage() {
         description={
           <p>
             Paste your resume, LinkedIn profile and notes. You review the profile that is
-            extracted, then get a tailored resume and cover letter that show the source of each
-            claim and the job requirements no evidence was found for.
+            extracted, then get a tailored resume and cover letter.
           </p>
         }
       />
